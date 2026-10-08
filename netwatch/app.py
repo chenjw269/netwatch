@@ -37,21 +37,25 @@ FONT_TITLE = (FONT, 17, "bold")
 FONT_LATENCY = (FONT, 24, "bold")
 FONT_TEXT = (FONT, 14)
 FONT_MUTED = (FONT, 13)
-FONT_SECTION = (FONT, 13)
-CARD = "#171a21"
-PANEL = "#e8edf5"
-PANEL_FG = "#1c2430"
-PANEL_MUTED = "#5c6575"
-LINE = "#8b93a7"
-FG = "#f2f4f8"
-MUTED = "#9399a6"
+FONT_SECTION = (FONT, 12)
+CARD = "#141820"
+PANEL = "#f5f7fb"
+PANEL_FG = "#1b2330"
+PANEL_MUTED = "#5e6878"
+LINE = "#313949"
+FG = "#f4f6fb"
+MUTED = "#8e96a8"
 OK = "#3dbe86"
 WARN = "#e0a84a"
 BAD = "#ef6a73"
-IDLE = "#7f8cff"
-BUTTON = "#3a445c"
-BUTTON_ACTIVE = "#4a5670"
-BUTTON_DISABLED = "#232833"
+IDLE = "#8b9bff"
+BUTTON = "#2a3142"
+BUTTON_ACTIVE = "#3a445c"
+BUTTON_DISABLED = "#1c212c"
+ACCENT = "#3d4f92"
+ACCENT_FG = "#f4f6ff"
+WARN_FILL = "#5c4630"
+WARN_FG = "#ffe7c4"
 CORNER = 26
 PANEL_CORNER = 18
 
@@ -141,31 +145,19 @@ class App:
         self.shell.pack(fill="both", expand=True)
         self.dock_rail = tk.Frame(self.shell, bg=CARD)
         self.dock_rail.pack(side="left", fill="y", padx=(12, 2))
-        self.dock = tk.Label(
-            self.dock_rail,
-            text="收\n起",
-            fg=FG,
-            bg=BUTTON,
-            font=FONT_MUTED,
-            cursor="hand2",
-            padx=10,
-            pady=12,
-            justify="center",
-        )
-        self.dock._is_dock = True
+        self.dock = _Dock(self.dock_rail)
         self.dock.pack(expand=True)
-        self.dock.bind("<Enter>", lambda _event: self.dock.configure(bg=BUTTON_ACTIVE))
-        self.dock.bind("<Leave>", lambda _event: self.dock.configure(bg=BUTTON))
         self.dock.bind("<ButtonRelease-1>", lambda _event: self._toggle_mini())
         self.body = tk.Frame(self.shell, bg=CARD, padx=16, pady=14)
         self.body.pack(side="left", fill="both", expand=True)
 
         self.header = tk.Frame(self.body, bg=CARD)
         self.header.pack(fill="x")
-        self.dot = tk.Canvas(self.header, width=18, height=18, bg=CARD, highlightthickness=0)
+        self.dot = tk.Canvas(self.header, width=22, height=22, bg=CARD, highlightthickness=0)
         self.dot.pack(side="left", pady=2)
-        self._ring_id = self.dot.create_oval(1, 1, 17, 17, outline=IDLE, width=2)
-        self._dot_id = self.dot.create_oval(5, 5, 13, 13, fill=IDLE, outline="")
+        self._glow_id = self.dot.create_oval(1, 1, 21, 21, outline=_mix(CARD, IDLE, 0.55), width=1)
+        self._ring_id = self.dot.create_oval(4, 4, 18, 18, outline=IDLE, width=2)
+        self._dot_id = self.dot.create_oval(8, 8, 14, 14, fill=IDLE, outline="")
         self.title_var = tk.StringVar(value="正在检测")
         self._title_font = tkfont.Font(font=FONT_TITLE)
         self.title_label = tk.Label(
@@ -182,9 +174,7 @@ class App:
         self.chevron = self._button(self.header, "详情", self.toggle, side="right")
         self.chevron.pack_forget()
         self.latency_var = tk.StringVar(value="…")
-        self.latency = tk.Label(
-            self.header, textvariable=self.latency_var, fg=IDLE, bg=CARD, font=FONT_LATENCY
-        )
+        self.latency = _Readout(self.header)
 
         self.sub_var = tk.StringVar(value="先看电脑到路由器，再看到 223.5.5.5")
         self.sub_label = tk.Label(
@@ -263,7 +253,7 @@ class App:
             anchor="w",
             wraplength=PANEL_WRAP,
         ).pack(fill="x", pady=(2, 0))
-        self.spark = tk.Canvas(self.details, width=PANEL_WRAP, height=36, bg=PANEL, highlightthickness=0)
+        self.spark = tk.Canvas(self.details, width=PANEL_WRAP, height=42, bg=PANEL, highlightthickness=0)
         self.spark.pack(fill="x", pady=(6, 0))
         self.deep_var = tk.StringVar(value="")
         self.deep_label = tk.Label(
@@ -323,30 +313,58 @@ class App:
         self.site_box.pack(fill="x", pady=(2, 0))
 
         self.actions = tk.Frame(self.body, bg=CARD)
+        rule = tk.Frame(self.actions, bg=LINE, height=1)
+        rule.pack(fill="x", pady=(2, 10))
+        rule.pack_propagate(False)
+        interval = tk.Frame(self.actions, bg=CARD)
+        interval.pack(fill="x", pady=(0, 8))
+        tk.Label(interval, text="监测间隔", fg=MUTED, bg=CARD, font=FONT_MUTED).pack(side="left", padx=(0, 8))
+        self._interval_buttons: dict[int, _Pill] = {}
+        for seconds in INTERVAL_CHOICES:
+            self._interval_buttons[seconds] = self._button(
+                interval,
+                interval_label(seconds),
+                lambda chosen=seconds: self._set_interval(chosen),
+                gap=6,
+            )
         tools = tk.Frame(self.actions, bg=CARD)
         tools.pack(fill="x")
         self.autostart_button = self._button(tools, "开机启动", self._toggle_autostart)
-        self.pause_button = self._button(tools, "暂停", self._toggle_pause)
-        self._button(tools, "退出", self.close)
+        self.pause_button = self._button(tools, "暂停", self._toggle_pause, kind="warn")
+        self.topmost_button = self._button(tools, "顶层显示：是", self._toggle_topmost)
+        self._button(tools, "退出", self.close, role="ghost")
         corner = tk.Frame(self.actions, bg=CARD)
-        corner.pack(fill="x", pady=(12, 0))
+        corner.pack(fill="x", pady=(8, 0))
         self.deep_button = self._button(corner, "丢包率测试", self.deep_loss)
         self._button(corner, "复制诊断", self.copy_diagnosis)
-        self.topmost_button = self._button(corner, "顶层显示：是", self._toggle_topmost, side="right")
         self._sync_buttons()
         self._layout()
 
     def _section(self, parent: tk.Frame, text: str) -> None:
-        tk.Label(parent, text=text, fg=PANEL_MUTED, bg=PANEL, font=FONT_SECTION).pack(anchor="w", pady=(12, 4))
+        row = tk.Frame(parent, bg=PANEL)
+        row.pack(fill="x", pady=(14, 4))
+        tick = tk.Canvas(row, width=3, height=12, bg=PANEL, highlightthickness=0, bd=0)
+        tick.pack(side="left", padx=(0, 8), pady=1)
+        tick.create_rectangle(0, 0, 3, 12, fill=IDLE, outline="")
+        tk.Label(row, text=text, fg=PANEL_MUTED, bg=PANEL, font=FONT_SECTION).pack(side="left")
 
     def _stat_block(self, parent: tk.Frame, title: tk.StringVar, stat: tk.StringVar) -> None:
-        tk.Label(parent, textvariable=title, fg=PANEL_FG, bg=PANEL, font=FONT_TEXT, anchor="w").pack(fill="x")
+        tk.Label(parent, textvariable=title, fg=PANEL_FG, bg=PANEL, font=(FONT, 14, "bold"), anchor="w").pack(fill="x")
         tk.Label(parent, textvariable=stat, fg=PANEL_MUTED, bg=PANEL, font=FONT_MUTED, anchor="w").pack(
-            fill="x", pady=(2, 6)
+            fill="x", pady=(2, 8)
         )
 
-    def _button(self, parent: tk.Frame, text: str, command, side: str = "left") -> "_Pill":
-        return _Pill(parent, text, command, side)
+    def _button(
+        self,
+        parent: tk.Frame,
+        text: str,
+        command,
+        side: str = "left",
+        role: str = "solid",
+        kind: str = "accent",
+        gap: int = 8,
+    ) -> "_Pill":
+        return _Pill(parent, text, command, side, role, kind, gap)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -382,14 +400,22 @@ class App:
                 self._wake.clear()
                 return
 
+    def _set_interval(self, seconds: int) -> None:
+        chosen = normalize_interval(seconds)
+        if chosen == self._interval:
+            self._sync_buttons()
+            return
+        self._interval = chosen
+        self.settings["interval_sec"] = chosen
+        self._sync_buttons()
+        self._persist()
+
     def _cycle_interval(self) -> None:
         try:
             index = INTERVAL_CHOICES.index(self._interval)
         except ValueError:
             index = -1
-        self._interval = INTERVAL_CHOICES[(index + 1) % len(INTERVAL_CHOICES)]
-        self.settings["interval_sec"] = self._interval
-        self._persist()
+        self._set_interval(INTERVAL_CHOICES[(index + 1) % len(INTERVAL_CHOICES)])
 
     def _apply(self, snapshot: Snapshot, found: Diagnosis) -> None:
         try:
@@ -398,6 +424,7 @@ class App:
             color = _LEVELS.get(found.level, IDLE)
             self.dot.itemconfigure(self._dot_id, fill=color)
             self.dot.itemconfigure(self._ring_id, outline=color)
+            self.dot.itemconfigure(self._glow_id, outline=_mix(CARD, color, 0.55))
             self.latency.configure(fg=color)
             self.title_var.set("已暂停" if self._paused.is_set() else found.title)
             self.latency_var.set(_latency_text(snapshot))
@@ -535,24 +562,25 @@ class App:
             return
         self._drawn_history = data
         canvas.delete("all")
-        if not data:
-            return
         width = int(canvas["width"])
         height = int(canvas["height"])
-        values = [item for item in data if item is not None]
-        peak = max(values + [50])
         slots = 28
         gap = width / slots
+        canvas.create_line(2, height - 2, width - 2, height - 2, fill="#d5dbe6")
+        if not data:
+            return
+        values = [item for item in data if item is not None]
+        peak = max(values + [50])
         start = slots - len(data)
         for index, value in enumerate(data):
-            x0 = (start + index) * gap + 1
-            x1 = x0 + max(gap - 2, 1)
+            x0 = (start + index) * gap + 2
+            x1 = x0 + max(gap - 4, 2)
             if value is None:
-                canvas.create_rectangle(x0, 1, x1, height - 1, fill=BAD, width=0)
+                _round_bar(canvas, x0, 2, x1, height - 1, BAD)
                 continue
-            bar = max(2, int(value / peak * (height - 2)))
+            bar = max(4, int(value / peak * (height - 4)))
             color = OK if value < 80 else WARN if value < 150 else BAD
-            canvas.create_rectangle(x0, height - bar, x1, height - 1, fill=color, width=0)
+            _round_bar(canvas, x0, height - bar, x1, height - 1, color)
 
     def _layout(self) -> None:
         self.sub_label.pack_forget()
@@ -593,10 +621,8 @@ class App:
         text = self.latency_var.get()
         # 毫秒数字保持大号；「超时」「…」和结论用同一字号。
         font = FONT_LATENCY if text[:1].isdigit() else FONT_TITLE
-        if getattr(self, "_latency_font", None) == font:
-            return
         self._latency_font = font
-        self.latency.configure(font=font)
+        self.latency.configure(text=text, font=font)
 
     def _fit_title(self) -> None:
         natural = max(int(self._title_font.measure(self.title_var.get())), 48)
@@ -686,9 +712,17 @@ class App:
             return
 
     def _sync_buttons(self) -> None:
-        self.autostart_button.configure(text="开机启动：开" if self.autostart_var.get() else "开机启动：关")
-        self.pause_button.configure(text="继续" if self.paused_var.get() else "暂停")
-        self.topmost_button.configure(text="顶层显示：是" if self.topmost_var.get() else "顶层显示：否")
+        self.autostart_button.configure(
+            text="开机启动：开" if self.autostart_var.get() else "开机启动：关",
+            selected=self.autostart_var.get(),
+        )
+        self.pause_button.configure(text="继续" if self.paused_var.get() else "暂停", selected=self.paused_var.get())
+        self.topmost_button.configure(
+            text="顶层显示：是" if self.topmost_var.get() else "顶层显示：否",
+            selected=self.topmost_var.get(),
+        )
+        for seconds, button in self._interval_buttons.items():
+            button.configure(selected=seconds == self._interval)
 
     def deep_loss(self) -> None:
         if self._deep_running:
@@ -1152,22 +1186,131 @@ def _proxy_text(proxy: ProxyState) -> str:
     return "未开代理，只测国内网站"
 
 
-class _Pill(tk.Canvas):
-    """底部操作用的圆角按钮。画布四角露出窗口底色，看起来是胶囊。"""
+class _Dock(tk.Canvas):
+    """左侧收起按钮。圆角，避免一块方标签贴在窗口边上。"""
 
-    def __init__(self, parent: tk.Misc, text: str, command, side: str) -> None:
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent, bg=CARD, highlightthickness=0, bd=0, cursor="hand2")
+        self._is_dock = True
+        self._text = "收\n起"
+        self._hot = False
+        self._font = tkfont.Font(font=FONT_MUTED)
+        self._redraw()
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+
+    def configure(self, cnf=None, **kwargs):  # type: ignore[override]
+        if cnf:
+            kwargs.update(cnf)
+        text = kwargs.pop("text", None)
+        kwargs.pop("padx", None)
+        kwargs.pop("pady", None)
+        kwargs.pop("bg", None)
+        if text is not None and text != self._text:
+            self._text = text
+            self._redraw()
+        if kwargs:
+            super().configure(**kwargs)
+
+    def _enter(self, _event: tk.Event) -> None:
+        self._hot = True
+        self._redraw()
+
+    def _leave(self, _event: tk.Event) -> None:
+        self._hot = False
+        self._redraw()
+
+    def _redraw(self) -> None:
+        lines = self._text.split("\n")
+        line_h = max(self._font.metrics("linespace"), 16)
+        text_w = max(self._font.measure(line) for line in lines)
+        width = text_w + 22
+        height = line_h * len(lines) + 18
+        super().configure(width=width, height=height)
+        self.delete("all")
+        _paint_round(self, 1, 1, width - 1, height - 1, min(16, height // 2), fill=BUTTON_ACTIVE if self._hot else BUTTON)
+        top = (height - line_h * len(lines)) / 2
+        for index, line in enumerate(lines):
+            self.create_text(width / 2, top + line_h * index + line_h / 2, text=line, fill=FG, font=self._font)
+
+
+class _Readout(tk.Canvas):
+    """延迟数字。带一层状态色底，不像直接贴在深色背景上。"""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        super().__init__(parent, bg=CARD, highlightthickness=0, bd=0)
+        self._text = "…"
+        self._fg = IDLE
+        self._font = tkfont.Font(font=FONT_LATENCY)
+        self._redraw()
+
+    def configure(self, cnf=None, **kwargs):  # type: ignore[override]
+        if cnf:
+            kwargs.update(cnf)
+        text = kwargs.pop("text", None)
+        fg = kwargs.pop("fg", None)
+        font = kwargs.pop("font", None)
+        changed = False
+        if text is not None and text != self._text:
+            self._text = text
+            changed = True
+        if fg is not None and fg != self._fg:
+            self._fg = fg
+            changed = True
+        if font is not None:
+            family, size = font[0], font[1]
+            weight = font[2] if len(font) > 2 else "normal"
+            if (self._font.cget("family"), int(self._font.cget("size")), self._font.cget("weight")) != (
+                family,
+                int(size),
+                weight,
+            ):
+                self._font.configure(family=family, size=size, weight=weight)
+                changed = True
+        if changed:
+            self._redraw()
+        if kwargs:
+            super().configure(**kwargs)
+
+    def _redraw(self) -> None:
+        pad_x = 12
+        pad_y = 5
+        width = max(self._font.measure(self._text) + pad_x * 2, 52)
+        height = max(self._font.metrics("linespace") + pad_y * 2, 28)
+        super().configure(width=width, height=height)
+        self.delete("all")
+        _paint_round(self, 1, 1, width - 1, height - 1, height // 2, fill=_mix(CARD, self._fg, 0.2))
+        self.create_text(width / 2, height / 2, text=self._text, fill=self._fg, font=self._font)
+
+
+class _Pill(tk.Canvas):
+    """底部操作用的圆角按钮。选中时填上强调色。"""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        text: str,
+        command,
+        side: str,
+        role: str = "solid",
+        kind: str = "accent",
+        gap: int = 8,
+    ) -> None:
         super().__init__(parent, bg=CARD, highlightthickness=0, bd=0, cursor="hand2")
         self._is_pill = True
         self._command = command
         self._label = text
         self._enabled = True
         self._hot = False
+        self._selected = False
+        self._role = role
+        self._kind = kind
         self._font = tkfont.Font(font=FONT_MUTED)
         self._redraw()
         self.bind("<Enter>", self._enter)
         self.bind("<Leave>", self._leave)
         self.bind("<ButtonRelease-1>", self._activate)
-        pad = (0, 8) if side == "left" else (8, 20)
+        pad = (0, gap) if side == "left" else (gap, 4)
         self.pack(side=side, padx=pad)
 
     def configure(self, cnf=None, **kwargs):  # type: ignore[override]
@@ -1175,12 +1318,20 @@ class _Pill(tk.Canvas):
             kwargs.update(cnf)
         text = kwargs.pop("text", None)
         state = kwargs.pop("state", None)
-        changed = text is not None or state is not None
-        if text is not None:
+        selected = kwargs.pop("selected", None)
+        changed = False
+        if text is not None and text != self._label:
             self._label = text
+            changed = True
         if state is not None:
-            self._enabled = state != "disabled"
-            super().configure(cursor="hand2" if self._enabled else "arrow")
+            enabled = state != "disabled"
+            if enabled != self._enabled:
+                self._enabled = enabled
+                super().configure(cursor="hand2" if self._enabled else "arrow")
+                changed = True
+        if selected is not None and bool(selected) != self._selected:
+            self._selected = bool(selected)
+            changed = True
         if changed:
             self._redraw()
         if kwargs:
@@ -1198,24 +1349,54 @@ class _Pill(tk.Canvas):
         if self._enabled and self._hot:
             self._command()
 
+    def _colors(self) -> tuple[str, str]:
+        if not self._enabled:
+            return BUTTON_DISABLED, MUTED
+        if self._selected:
+            if self._kind == "warn":
+                return (_mix(WARN_FILL, "#ffffff", 0.08) if self._hot else WARN_FILL), WARN_FG
+            return (_mix(ACCENT, "#ffffff", 0.1) if self._hot else ACCENT), ACCENT_FG
+        if self._role == "ghost":
+            return (BUTTON_ACTIVE if self._hot else "#1c2230"), (FG if self._hot else MUTED)
+        if self._hot:
+            return BUTTON_ACTIVE, FG
+        return BUTTON, FG
+
     def _redraw(self) -> None:
         linespace = max(self._font.metrics("linespace"), 16)
-        pad_y = max(10, linespace // 3)
-        width = self._font.measure(self._label) + linespace + 8
+        pad_y = max(8, linespace // 4)
+        width = self._font.measure(self._label) + linespace + 10
         height = linespace + pad_y * 2
         super().configure(width=width, height=height)
         self.delete("all")
-        if not self._enabled:
-            fill = BUTTON_DISABLED
-            fg = MUTED
-        elif self._hot:
-            fill = BUTTON_ACTIVE
-            fg = FG
+        fill, fg = self._colors()
+        radius = height // 2
+        if self._role == "ghost" and not self._selected:
+            _paint_round(self, 1, 1, width - 1, height - 1, radius, fill=BUTTON)
+            _paint_round(self, 2, 2, width - 2, height - 2, radius - 1, fill=fill)
         else:
-            fill = BUTTON
-            fg = FG
-        _paint_round(self, 1, 1, width - 1, height - 1, height // 2, fill=fill)
-        self.create_text(width / 2, height / 2, text=self._label, fill=fg, font=FONT_MUTED)
+            _paint_round(self, 1, 1, width - 1, height - 1, radius, fill=fill)
+        self.create_text(width / 2, height / 2, text=self._label, fill=fg, font=self._font)
+
+
+def _mix(base: str, tint: str, amount: float) -> str:
+    def channel(color: str, index: int) -> int:
+        return int(color[index : index + 2], 16)
+
+    parts = []
+    for index in (1, 3, 5):
+        mixed = channel(base, index) * (1 - amount) + channel(tint, index) * amount
+        parts.append(f"{max(0, min(255, round(mixed))):02x}")
+    return "#" + "".join(parts)
+
+
+def _round_bar(canvas: tk.Canvas, x0: float, y0: float, x1: float, y1: float, fill: str) -> None:
+    if y1 - y0 < 3 or x1 - x0 < 2:
+        canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline="")
+        return
+    radius = min(3, (x1 - x0) / 2, (y1 - y0) / 2)
+    canvas.create_rectangle(x0, y0 + radius, x1, y1, fill=fill, outline="")
+    canvas.create_oval(x0, y0, x1, y0 + radius * 2, fill=fill, outline="")
 
 
 def _paint_round(canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, radius: int, fill: str) -> None:
