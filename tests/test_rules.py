@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from netwatch.config import DEFAULT_INTERVAL_SEC, interval_label, normalize_interval
 from netwatch.diagnose import diagnose
 from netwatch.system import lookup_ipv4, site_host
 from netwatch.models import PingSample, ProxyState, SiteProbe, Snapshot, WifiInfo, normalize_proxy
@@ -324,6 +325,16 @@ class DiagnoseTests(unittest.TestCase):
         )
         self.assertNotEqual(found.title, "路由器或运营商")
         self.assertIn("隧道", found.detail)
+
+
+class TestInterval(unittest.TestCase):
+    def test_default_is_a_few_minutes(self) -> None:
+        self.assertEqual(DEFAULT_INTERVAL_SEC, 180)
+        self.assertEqual(normalize_interval(None), 180)
+        self.assertEqual(normalize_interval(14), 180)
+        self.assertEqual(normalize_interval(True), 180)
+        self.assertEqual(normalize_interval(300), 300)
+        self.assertEqual(interval_label(180), "3 分钟")
 
 
 if __name__ == "__main__":

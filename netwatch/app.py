@@ -8,7 +8,13 @@ import tkinter as tk
 import tkinter.font as tkfont
 import traceback
 
-from netwatch.config import CYCLE_GAP_SEC, DEEP_PING_COUNT, INTERNET_HOST
+from netwatch.config import (
+    DEEP_PING_COUNT,
+    INTERNET_HOST,
+    INTERVAL_CHOICES,
+    interval_label,
+    normalize_interval,
+)
 from netwatch.diagnose import diagnose
 from netwatch.models import Diagnosis, PingSample, ProxyState, SiteProbe, Snapshot, WifiInfo
 from netwatch.store import (
@@ -85,6 +91,10 @@ class App:
         self.paused_var = tk.BooleanVar(value=bool(self.settings.get("paused", False)))
         self.autostart_var = tk.BooleanVar(value=autostart_enabled())
         self.topmost_var = tk.BooleanVar(value=bool(self.settings.get("topmost", True)))
+        self._interval = normalize_interval(self.settings.get("interval_sec"))
+        if self.settings.get("interval_sec") != self._interval:
+            self.settings["interval_sec"] = self._interval
+            self._persist()
         self._apply_topmost()
         if self.paused_var.get():
             self._paused.set()
@@ -344,6 +354,7 @@ class App:
                 self._wake.wait(0.3)
                 self._wake.clear()
                 continue
+            started = time.monotonic()
             try:
                 snapshot = collect()
                 found = diagnose(snapshot)
@@ -355,13 +366,30 @@ class App:
                 self.root.after(0, self._apply, snapshot, found)
             except tk.TclError:
                 return
-            self._wake.wait(CYCLE_GAP_SEC)
-            self._wake.clear()
+            self._sleep_until(started)
 
     def kick(self) -> None:
         if self._paused.is_set():
             return
         self._wake.set()
+
+    def _sleep_until(self, started: float) -> None:
+        while not self._stop.is_set():
+            remaining = started + self._interval - time.monotonic()
+            if remaining <= 0:
+                return
+            if self._wake.wait(min(remaining, 1.0)):
+                self._wake.clear()
+                return
+
+    def _cycle_interval(self) -> None:
+        try:
+            index = INTERVAL_CHOICES.index(self._interval)
+        except ValueError:
+            index = -1
+        self._interval = INTERVAL_CHOICES[(index + 1) % len(INTERVAL_CHOICES)]
+        self.settings["interval_sec"] = self._interval
+        self._persist()
 
     def _apply(self, snapshot: Snapshot, found: Diagnosis) -> None:
         try:
@@ -773,6 +801,7 @@ class App:
             ("收起" if self.expanded else "展开详情", self.toggle),
             ("立即检测", self.kick),
             ("继续监测" if self._paused.is_set() else "暂停监测", self._toggle_pause),
+            (f"间隔：{interval_label(self._interval)}", self._cycle_interval),
             ("开机启动：开" if autostart_enabled() else "开机启动：关", self._toggle_autostart),
             ("顶层显示：是" if self.topmost_var.get() else "顶层显示：否", self._toggle_topmost),
             ("丢包率测试", self.deep_loss),
