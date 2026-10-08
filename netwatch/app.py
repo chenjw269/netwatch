@@ -23,9 +23,10 @@ from netwatch.store import (
 from netwatch.system import collect, ping_host
 
 FONT = "Microsoft YaHei UI"
-WINDOW_WIDTH = 660
-WRAP = 600
-PANEL_WRAP = 520
+# 展开后面板的目标宽度，按 96 DPI 下的像素。实际宽度会乘上系统缩放。
+EXPANDED_WIDTH = 520
+WRAP = 420
+PANEL_WRAP = 460
 FONT_TITLE = (FONT, 17, "bold")
 FONT_LATENCY = (FONT, 24, "bold")
 FONT_TEXT = (FONT, 14)
@@ -389,7 +390,7 @@ class App:
                 self.root.update_idletasks()
             self._fit_details()
             needed_h = max(self.shell.winfo_reqheight(), 52)
-            needed_w = max(self.shell.winfo_reqwidth(), 180) if self.mini else WINDOW_WIDTH
+            needed_w = self._window_width()
             if abs(needed_h - self.root.winfo_height()) > 2 or abs(needed_w - self.root.winfo_width()) > 2:
                 self._place(first=False)
         except tk.TclError:
@@ -571,9 +572,10 @@ class App:
 
     def _fit_title(self) -> None:
         natural = max(int(self._title_font.measure(self.title_var.get())), 48)
-        if self.mini:
-            # 按文字本身的宽度排成一行，窗口跟着变宽，不再挤成每行两三个字。
-            width = min(natural, 460)
+        scale = _ui_scale(self.root)
+        if self.mini or not self.expanded:
+            # 收起时按文字本身排成一行，窗口跟着变窄，不再留出一大段空白。
+            width = min(natural, int(460 * scale))
         else:
             if not self.title_label.winfo_ismapped():
                 return
@@ -584,7 +586,7 @@ class App:
             for widget, gap in ((self.dot, 8), (self.latency, 20), (self.chevron, 16)):
                 if widget.winfo_ismapped():
                     used += max(widget.winfo_reqwidth(), 1) + gap
-            width = max(180, header - used)
+            width = max(int(160 * scale), header - used)
         current = int(float(self.title_label.cget("wraplength")))
         if abs(current - width) > 2:
             self.title_label.configure(wraplength=width)
@@ -882,12 +884,24 @@ class App:
 
     def _detail_inner_width(self, reserve_scroll: bool) -> int:
         host = self.detail_host.winfo_width()
+        scale = _ui_scale(self.root)
         if host < 80:
-            host = max(320, WINDOW_WIDTH - 180)
+            host = max(int(300 * scale), self._window_width() - int(140 * scale))
         used = 16
         if reserve_scroll:
             used += 28
-        return max(180, host - used)
+        return max(int(180 * scale), host - used)
+
+    def _window_width(self) -> int:
+        """收起时贴着内容；展开时用同一套物理宽度，并限制在屏幕以内。"""
+        scale = _ui_scale(self.root)
+        screen_w = max(int(self.root.winfo_screenwidth()), 800)
+        content = max(int(self.shell.winfo_reqwidth()), int(180 * scale))
+        cap = int(screen_w * 0.72)
+        if self.mini or not self.expanded:
+            return min(content, cap)
+        design = int(round(EXPANDED_WIDTH * scale))
+        return min(max(content, design), cap)
 
     def _apply_detail_width(self, width: int) -> None:
         if width == self._detail_text_width and getattr(self, "_detail_width_ready", False):
@@ -973,7 +987,7 @@ class App:
             self._sync_latency_style()
             self._fit_title()
         self.root.update_idletasks()
-        width = max(self.shell.winfo_reqwidth(), 180) if self.mini else WINDOW_WIDTH
+        width = self._window_width()
         height = max(self.shell.winfo_reqheight(), 52)
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
@@ -1247,6 +1261,15 @@ def _widget_in(widget: tk.Misc, parent: tk.Misc) -> bool:
             return True
         current = getattr(current, "master", None)
     return False
+
+
+def _ui_scale(root: tk.Misc) -> float:
+    """1 表示 96 DPI。字号已经跟着系统缩放，窗口像素也按这个倍数计算。"""
+    try:
+        scaling = float(root.tk.call("tk", "scaling"))
+    except (tk.TclError, TypeError, ValueError):
+        scaling = 96 / 72
+    return max(0.85, scaling / (96 / 72))
 
 
 def _apply_scaling(root: tk.Tk) -> None:

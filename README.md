@@ -4,7 +4,9 @@
 
 ## 给普通用户
 
-1. 打开这个 GitHub 仓库的 Releases 页面，下载 `NetWatch-Setup.exe`。
+[下载 NetWatch-Setup.exe](https://github.com/chenjw269/netwatch/releases/latest/download/NetWatch-Setup.exe)
+
+1. 点击上面的链接，安装包会直接开始下载。
 2. 双击安装。不需要管理员权限，也不需要另外安装 Python。
 3. 安装结束会自己打开。窗口出现在屏幕右下角，开机也会自己启动。
 
