@@ -2,6 +2,8 @@
 
 放在桌面角落，看网络卡在电脑到路由器，还是路由器到外面。默认大约 3 分钟测一次。
 
+![展开详情，往下看判断和分段，再收起](docs/usage.gif)
+
 ## 安装
 
 [下载 NetWatch-Setup.exe](https://github.com/chenjw269/netwatch/releases/latest/download/NetWatch-Setup.exe)
