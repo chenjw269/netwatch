@@ -12,6 +12,7 @@ from netwatch.config import (
     DEEP_PING_COUNT,
     INTERNET_HOST,
     INTERVAL_CHOICES,
+    PING_WAIT_MS,
     interval_label,
     normalize_interval,
 )
@@ -38,7 +39,8 @@ FONT_LATENCY = (FONT, 24, "bold")
 FONT_TEXT = (FONT, 14)
 FONT_MUTED = (FONT, 13)
 FONT_SECTION = (FONT, 12)
-CARD = "#141820"
+CARD = "#242b3a"
+EDGE = "#4a5670"
 PANEL = "#f5f7fb"
 SHEET = "#ffffff"
 SECTION_HEAD = "#e8edf6"
@@ -46,16 +48,16 @@ SECTION_EDGE = "#d5dced"
 INSET = "#f3f6fb"
 PANEL_FG = "#1b2330"
 PANEL_MUTED = "#5e6878"
-LINE = "#313949"
+LINE = "#4a5670"
 FG = "#f4f6fb"
 MUTED = "#8e96a8"
 OK = "#3dbe86"
 WARN = "#e0a84a"
 BAD = "#ef6a73"
 IDLE = "#8b9bff"
-BUTTON = "#2a3142"
-BUTTON_ACTIVE = "#3a445c"
-BUTTON_DISABLED = "#1c212c"
+BUTTON = "#343d52"
+BUTTON_ACTIVE = "#45506c"
+BUTTON_DISABLED = "#2a3142"
 ACCENT = "#3d4f92"
 ACCENT_FG = "#f4f6ff"
 WARN_FILL = "#5c4630"
@@ -92,7 +94,7 @@ class App:
 
         self.root = tk.Tk()
         self.root.title("网络波动")
-        self.root.configure(bg=CARD)
+        self.root.configure(bg=EDGE)
         self.root.overrideredirect(True)
         _apply_scaling(self.root)
 
@@ -146,11 +148,11 @@ class App:
 
     def _build(self) -> None:
         self.shell = tk.Frame(self.root, bg=CARD)
-        self.shell.pack(fill="both", expand=True)
+        self.shell.pack(fill="both", expand=True, padx=1, pady=1)
         self.dock_rail = tk.Frame(self.shell, bg=CARD)
-        self.dock_rail.pack(side="left", fill="y", padx=(12, 2))
+        self.dock_rail.pack(side="left", fill="y", padx=(12, 8), pady=14)
         self.dock = _Dock(self.dock_rail)
-        self.dock.pack(expand=True)
+        self.dock.pack(anchor="n")
         self.dock.bind("<ButtonRelease-1>", lambda _event: self._toggle_mini())
         self.body = tk.Frame(self.shell, bg=CARD, padx=16, pady=14)
         self.body.pack(side="left", fill="both", expand=True)
@@ -175,7 +177,7 @@ class App:
             wraplength=240,
         )
         self.title_label.pack(side="left", padx=(8, 8))
-        self.chevron = self._button(self.header, "详情", self.toggle, side="right")
+        self.chevron = self._button(self.header, "展开详情", self.toggle, side="right")
         self.chevron.pack_forget()
         self.latency_var = tk.StringVar(value="…")
         self.latency = _Readout(self.header)
@@ -187,7 +189,7 @@ class App:
             fg=MUTED,
             bg=CARD,
             font=FONT_MUTED,
-            anchor="w",
+            anchor="nw",
             justify="left",
             wraplength=WRAP,
         )
@@ -199,7 +201,13 @@ class App:
         self.detail_host = tk.Frame(self.body, bg=PANEL)
         self.detail_view = tk.Frame(self.detail_host, bg=PANEL, height=1)
         self.detail_view.pack_propagate(False)
-        self.detail_view.pack(side="left", fill="both", expand=True, padx=(12, 4), pady=12)
+        self.detail_view.pack(
+            side="left",
+            fill="both",
+            expand=True,
+            padx=(PANEL_CORNER, PANEL_CORNER),
+            pady=(16, 12),
+        )
         self.details = tk.Frame(self.detail_view, bg=PANEL)
         self.details.place(x=0, y=0, width=PANEL_WRAP)
         self.detail_scroll = tk.Scrollbar(
@@ -216,7 +224,7 @@ class App:
         )
         self.root.bind_all("<MouseWheel>", self._wheel)
 
-        judge = self._section(self.details, "判断", IDLE, first=True)
+        judge = self._section(self.details, "诊断结果", IDLE, first=True)
         self.rule_var = tk.StringVar(value="")
         tk.Label(
             judge,
@@ -240,7 +248,7 @@ class App:
             wraplength=PANEL_WRAP,
         ).pack(fill="x")
 
-        hops = self._section(self.details, "分段", OK)
+        hops = self._section(self.details, "链路测试", OK)
         self.gw_title = tk.StringVar(value="电脑 → 路由器")
         self.gw_stat = tk.StringVar(value="等待")
         self._stat_block(hops, self.gw_title, self.gw_stat)
@@ -249,7 +257,7 @@ class App:
         self._stat_block(hops, self.inet_title, self.inet_stat)
         tk.Label(
             hops,
-            text="柱子越高越慢，红格是这一轮超时。",
+            text="柱子的高度代表时延，\n红色代表该轮连接测试超时。",
             fg=PANEL_MUTED,
             bg=SHEET,
             font=FONT_MUTED,
@@ -264,7 +272,7 @@ class App:
             hops, textvariable=self.deep_var, fg=PANEL_MUTED, bg=SHEET, font=FONT_MUTED, anchor="w"
         )
 
-        wireless = self._section(self.details, "无线", "#5b8def")
+        wireless = self._section(self.details, "Wifi 信息", "#5b8def")
         self.wifi_var = tk.StringVar(value="正在读取")
         self.wifi_sub = tk.StringVar(value="")
         tk.Label(
@@ -301,7 +309,7 @@ class App:
             wraplength=PANEL_WRAP,
         )
 
-        probe = self._section(self.details, "拨测", WARN)
+        probe = self._section(self.details, "连接测试", WARN)
         self.proxy_var = tk.StringVar(value="")
         tk.Label(
             probe,
@@ -340,7 +348,7 @@ class App:
         corner = tk.Frame(self.actions, bg=CARD)
         corner.pack(fill="x", pady=(8, 0))
         self.deep_button = self._button(corner, "丢包率测试", self.deep_loss)
-        self._button(corner, "复制诊断", self.copy_diagnosis)
+        self._button(corner, "复制诊断结果", self.copy_diagnosis)
         self._sync_buttons()
         self._layout()
 
@@ -445,7 +453,9 @@ class App:
             self.dot.itemconfigure(self._ring_id, outline=color)
             self.dot.itemconfigure(self._glow_id, outline=_mix(CARD, color, 0.55))
             self.latency.configure(fg=color)
-            self.title_var.set("已暂停" if self._paused.is_set() else found.title)
+            paused = self._paused.is_set()
+            self.title_var.set("已暂停" if paused else found.title)
+            self.title_label.configure(fg=MUTED if paused else color)
             self.latency_var.set(_latency_text(snapshot))
             self._sync_latency_style()
             self.sub_var.set(_subline(snapshot))
@@ -460,8 +470,7 @@ class App:
             self._push_history(snapshot)
             self._draw_history()
             self._fit_title()
-            if self.mini:
-                self.root.update_idletasks()
+            self.root.update_idletasks()
             self._fit_details()
             needed_h = max(self.shell.winfo_reqheight(), 52)
             needed_w = self._window_width()
@@ -474,7 +483,7 @@ class App:
         show_hint = False
         if wifi is None or not wifi.connected:
             self.wifi_var.set("没有已连接的无线")
-            self.wifi_sub.set("如果用的是网线，分段诊断仍然有效。")
+            self.wifi_sub.set("如果用的是网线，链路测试仍然有效。")
             if self.wifi_hint_label.winfo_manager():
                 self.wifi_hint_label.pack_forget()
             return
@@ -522,7 +531,7 @@ class App:
             self._site_signature = signature
             self._site_values = []
             if not rows:
-                tk.Label(self.site_box, text="等待这一轮拨测", fg=PANEL_MUTED, bg=SHEET, font=FONT_MUTED).pack(anchor="w")
+                tk.Label(self.site_box, text="等待这一轮连接测试", fg=PANEL_MUTED, bg=SHEET, font=FONT_MUTED).pack(anchor="w")
                 return
             for name, text, color, address in rows:
                 row = tk.Frame(self.site_box, bg=SHEET)
@@ -589,21 +598,24 @@ class App:
         height = int(canvas["height"])
         slots = 28
         gap = width / slots
+        floor = height - 3
         canvas.create_line(2, height - 2, width - 2, height - 2, fill="#d5dbe6")
         if not data:
             return
         values = [item for item in data if item is not None]
         peak = max(values + [50])
         start = slots - len(data)
+        usable = max(floor - 2, 6)
         for index, value in enumerate(data):
-            x0 = (start + index) * gap + 2
-            x1 = x0 + max(gap - 4, 2)
+            span = min(max(gap - 6, 4), 8)
+            x0 = (start + index) * gap + (gap - span) / 2
+            x1 = x0 + span
             if value is None:
-                _round_bar(canvas, x0, 2, x1, height - 1, BAD)
+                _round_bar(canvas, x0, 2, x1, floor, BAD)
                 continue
-            bar = max(4, int(value / peak * (height - 4)))
+            bar = max(6, int(value / peak * usable))
             color = OK if value < 80 else WARN if value < 150 else BAD
-            _round_bar(canvas, x0, height - bar, x1, height - 1, color)
+            _round_bar(canvas, x0, floor - bar, x1, floor, color)
 
     def _layout(self) -> None:
         self.sub_label.pack_forget()
@@ -614,16 +626,16 @@ class App:
         self.detail_host.pack_forget()
         self.actions.pack_forget()
         if self.mini:
-            self.dock.configure(text="展开", padx=14, pady=4)
-            self.dock_rail.pack_configure(padx=(10, 8), pady=10)
+            self.dock.configure(text="还原")
+            self.dock_rail.pack_configure(padx=(10, 8), pady=8)
             self.body.configure(padx=12, pady=8)
             self.latency.pack(side="right", padx=(8, 14))
             self.title_label.pack(side="left", padx=(8, 8))
             self._sync_latency_style()
             self._fit_title()
             return
-        self.dock.configure(text="收\n起", padx=10, pady=10)
-        self.dock_rail.pack_configure(padx=(12, 2), pady=0)
+        self.dock.configure(text="小窗")
+        self.dock_rail.pack_configure(padx=(12, 8), pady=14)
         self.body.configure(padx=16, pady=14)
         self.chevron.pack(side="right", padx=(12, 2))
         self.latency.pack(side="right", padx=(8, 8))
@@ -633,10 +645,10 @@ class App:
             self.divider.pack(fill="x", pady=(10, 8))
             self.detail_host.pack(fill="x")
             self.actions.pack(fill="x", pady=(8, 0))
-            self.chevron.configure(text="收起")
+            self.chevron.configure(text="收起详情")
             self._fit_details()
         else:
-            self.chevron.configure(text="详情")
+            self.chevron.configure(text="展开详情")
         self._sync_latency_style()
         self._fit_title()
 
@@ -700,6 +712,7 @@ class App:
         self._sync_buttons()
         self._persist()
         self.title_var.set("已暂停" if paused else self._diagnosis.title)
+        self.title_label.configure(fg=MUTED if paused else _LEVELS.get(self._diagnosis.level, IDLE))
 
     def _toggle_autostart(self) -> None:
         enabled = not autostart_enabled()
@@ -854,15 +867,15 @@ class App:
         menu.configure(bg="#222633")
         self._menu = menu
         entries: list[tuple[str, object] | None] = [
-            ("收成小窗" if not self.mini else "恢复窗口", self._toggle_mini),
-            ("收起" if self.expanded else "展开详情", self.toggle),
+            ("收成小窗" if not self.mini else "还原窗口", self._toggle_mini),
+            ("收起详情" if self.expanded else "展开详情", self.toggle),
             ("立即检测", self.kick),
             ("继续监测" if self._paused.is_set() else "暂停监测", self._toggle_pause),
             (f"间隔：{interval_label(self._interval)}", self._cycle_interval),
             ("开机启动：开" if autostart_enabled() else "开机启动：关", self._toggle_autostart),
             ("顶层显示：是" if self.topmost_var.get() else "顶层显示：否", self._toggle_topmost),
             ("丢包率测试", self.deep_loss),
-            ("复制诊断", self.copy_diagnosis),
+            ("复制诊断结果", self.copy_diagnosis),
             None,
             ("退出", self.close),
         ]
@@ -1114,6 +1127,7 @@ class App:
             self.root.geometry(f"{width}x{height}+{x}+{y}")
             self.root.update_idletasks()
         _round_window(self.root, CORNER)
+        _apply_glass(_top_hwnd(self.root))
         if self.expanded and not self.mini:
             self._mask_panel_corners()
 
@@ -1161,7 +1175,7 @@ def _latency_text(snapshot: Snapshot) -> str:
     if sample.sent <= 0:
         return "…"
     if not sample.replied or sample.avg_ms is None:
-        return "超时"
+        return "无回复"
     return f"{sample.avg_ms} ms"
 
 
@@ -1180,7 +1194,7 @@ def _short_hop(label: str, sample: PingSample) -> str:
     if sample.sent <= 0:
         return f"{label} —"
     if not sample.replied or sample.avg_ms is None:
-        return f"{label} 超时"
+        return f"{label} 无回复，已等 {PING_WAIT_MS}ms"
     loss = f" 丢{sample.loss_pct}%" if sample.loss_pct else ""
     return f"{label} {sample.avg_ms}ms{loss}"
 
@@ -1189,7 +1203,7 @@ def _ping_text(sample: PingSample) -> str:
     if sample.sent <= 0:
         return sample.error or "没有数据"
     if not sample.replied:
-        return f"连续超时 · 丢包 {sample.loss_pct}%"
+        return f"无回复 · 已等 {PING_WAIT_MS} ms · 没有测到延迟"
     avg = f"{sample.avg_ms} ms" if sample.avg_ms is not None else "—"
     longest = f"{sample.max_ms} ms" if sample.max_ms is not None else "—"
     return f"平均 {avg}    最长 {longest}    丢包 {sample.loss_pct}%"
@@ -1215,7 +1229,7 @@ class _Dock(tk.Canvas):
     def __init__(self, parent: tk.Misc) -> None:
         super().__init__(parent, bg=CARD, highlightthickness=0, bd=0, cursor="hand2")
         self._is_dock = True
-        self._text = "收\n起"
+        self._text = "小窗"
         self._hot = False
         self._font = tkfont.Font(font=FONT_MUTED)
         self._redraw()
@@ -1244,17 +1258,15 @@ class _Dock(tk.Canvas):
         self._redraw()
 
     def _redraw(self) -> None:
-        lines = self._text.split("\n")
-        line_h = max(self._font.metrics("linespace"), 16)
-        text_w = max(self._font.measure(line) for line in lines)
-        width = text_w + 22
-        height = line_h * len(lines) + 18
+        linespace = max(self._font.metrics("linespace"), 16)
+        pad_y = max(8, linespace // 4)
+        label = self._text.replace("\n", "")
+        width = self._font.measure(label) + linespace + 10
+        height = linespace + pad_y * 2
         super().configure(width=width, height=height)
         self.delete("all")
-        _paint_round(self, 1, 1, width - 1, height - 1, min(16, height // 2), fill=BUTTON_ACTIVE if self._hot else BUTTON)
-        top = (height - line_h * len(lines)) / 2
-        for index, line in enumerate(lines):
-            self.create_text(width / 2, top + line_h * index + line_h / 2, text=line, fill=FG, font=self._font)
+        _paint_round(self, 1, 1, width - 1, height - 1, height // 2, fill=BUTTON_ACTIVE if self._hot else BUTTON)
+        self.create_text(width / 2, height / 2, text=label, fill=FG, font=self._font)
 
 
 class _Readout(tk.Canvas):
@@ -1265,6 +1277,8 @@ class _Readout(tk.Canvas):
         self._text = "…"
         self._fg = IDLE
         self._font = tkfont.Font(font=FONT_LATENCY)
+        self._slot_font = tkfont.Font(font=FONT_LATENCY)
+        self._slot_title = tkfont.Font(font=FONT_TITLE)
         self._redraw()
 
     def configure(self, cnf=None, **kwargs):  # type: ignore[override]
@@ -1298,8 +1312,14 @@ class _Readout(tk.Canvas):
     def _redraw(self) -> None:
         pad_x = 12
         pad_y = 5
-        width = max(self._font.measure(self._text) + pad_x * 2, 52)
-        height = max(self._font.metrics("linespace") + pad_y * 2, 28)
+        # 「13 ms」和「无回复」共用同一宽度，窗口不会跟着文字长短跳动。
+        needed = max(
+            self._font.measure(self._text),
+            self._slot_font.measure("888 ms"),
+            self._slot_title.measure("无回复"),
+        )
+        width = max(needed + pad_x * 2, 52)
+        height = max(self._slot_font.metrics("linespace") + pad_y * 2, 28)
         super().configure(width=width, height=height)
         self.delete("all")
         _paint_round(self, 1, 1, width - 1, height - 1, height // 2, fill=_mix(CARD, self._fg, 0.2))
@@ -1413,13 +1433,60 @@ def _mix(base: str, tint: str, amount: float) -> str:
     return "#" + "".join(parts)
 
 
+_BAR_CACHE: dict[tuple[int, int, str, str], tk.PhotoImage] = {}
+
+
 def _round_bar(canvas: tk.Canvas, x0: float, y0: float, x1: float, y1: float, fill: str) -> None:
-    if y1 - y0 < 3 or x1 - x0 < 2:
-        canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline="")
-        return
-    radius = min(3, (x1 - x0) / 2, (y1 - y0) / 2)
-    canvas.create_rectangle(x0, y0 + radius, x1, y1, fill=fill, outline="")
-    canvas.create_oval(x0, y0, x1, y0 + radius * 2, fill=fill, outline="")
+    """圆角柱。画布椭圆只有实心和透明，矮柱子的顶角会呈阶梯。"""
+    width = max(2, int(round(x1 - x0)))
+    height = max(2, int(round(y1 - y0)))
+    image = _aa_capsule(width, height, fill, SHEET)
+    canvas.create_image(int(round(x0)), int(round(y0)), image=image, anchor="nw")
+
+
+def _in_round_rect(px: float, py: float, width: int, height: int, radius: float) -> bool:
+    """顶角是圆的，底边平。矮柱子不再用椭圆去盖，避免阶梯角。"""
+    # 底边贴齐，柱脚是实的；顶和两侧留出半像素，边缘才能混色。
+    left, top, right, bottom = 0.65, 0.65, width - 0.65, float(height)
+    if px < left or px > right or py < top or py > bottom:
+        return False
+    limit = min(radius, (right - left) / 2, max((bottom - top) / 2, 0.5))
+    if py >= top + limit:
+        return True
+    cx = min(max(px, left + limit), right - limit)
+    dx = px - cx
+    dy = py - (top + limit)
+    return dx * dx + dy * dy <= limit * limit
+
+
+def _aa_capsule(width: int, height: int, fill: str, outer: str) -> tk.PhotoImage:
+    key = (width, height, fill, outer)
+    cached = _BAR_CACHE.get(key)
+    if cached is not None:
+        return cached
+    scale = 6
+    samples = scale * scale
+    radius = min(width, height) / 2
+    image = tk.PhotoImage(width=width, height=height)
+    for y in range(height):
+        row = []
+        for x in range(width):
+            hit = 0
+            for sy in range(scale):
+                for sx in range(scale):
+                    px = x + (sx + 0.5) / scale
+                    py = y + (sy + 0.5) / scale
+                    if _in_round_rect(px, py, width, height, radius):
+                        hit += 1
+            if hit <= 0:
+                row.append(outer)
+            elif hit >= samples:
+                row.append(fill)
+            else:
+                row.append(_mix(outer, fill, hit / samples))
+        image.put("{" + " ".join(row) + "}", to=(0, y))
+    _BAR_CACHE[key] = image
+    return image
 
 
 def _paint_round(canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, radius: int, fill: str) -> None:
@@ -1508,6 +1575,42 @@ def _aa_quarter(size: int, outer: str, inner: str, quadrant: str) -> tk.PhotoIma
         image.put("{" + " ".join(row) + "}", to=(0, y))
     _QUARTER_CACHE[key] = image
     return image
+
+
+class _ACCENT_POLICY(ctypes.Structure):
+    _fields_ = [
+        ("AccentState", ctypes.c_int),
+        ("AccentFlags", ctypes.c_int),
+        ("GradientColor", ctypes.c_uint),
+        ("AnimationId", ctypes.c_int),
+    ]
+
+
+class _COMPOSITION_DATA(ctypes.Structure):
+    _fields_ = [
+        ("Attribute", ctypes.c_int),
+        ("Data", ctypes.c_void_p),
+        ("SizeOfData", ctypes.c_size_t),
+    ]
+
+
+def _apply_glass(hwnd: int) -> None:
+    """亚克力：后面的画面先模糊，再罩一层深色。按钮、文字和白卡片保持原色。"""
+    if not hwnd:
+        return
+    try:
+        # AccentState 4 是亚克力。罩色为 0 时只留系统模糊，深色底和白卡片上的字都还在。
+        # 再填一层浅色罩，或者整窗乘透明度，字会被冲淡。
+        policy = _ACCENT_POLICY(4, 2, 0, 0)
+        data = _COMPOSITION_DATA(19, ctypes.addressof(policy), ctypes.sizeof(policy))
+        user = ctypes.windll.user32
+        set_comp = user.SetWindowCompositionAttribute
+        set_comp.argtypes = [wintypes.HWND, ctypes.POINTER(_COMPOSITION_DATA)]
+        set_comp.restype = wintypes.BOOL
+        set_comp(hwnd, ctypes.byref(data))
+    except Exception:
+        log_error(traceback.format_exc())
+        return
 
 
 def _round_window(widget: tk.Misc, radius: int) -> None:
