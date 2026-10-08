@@ -40,6 +40,10 @@ FONT_MUTED = (FONT, 13)
 FONT_SECTION = (FONT, 12)
 CARD = "#141820"
 PANEL = "#f5f7fb"
+SHEET = "#ffffff"
+SECTION_HEAD = "#e8edf6"
+SECTION_EDGE = "#d5dced"
+INSET = "#f3f6fb"
 PANEL_FG = "#1b2330"
 PANEL_MUTED = "#5e6878"
 LINE = "#313949"
@@ -212,13 +216,13 @@ class App:
         )
         self.root.bind_all("<MouseWheel>", self._wheel)
 
-        self._section(self.details, "判断")
+        judge = self._section(self.details, "判断", IDLE, first=True)
         self.rule_var = tk.StringVar(value="")
         tk.Label(
-            self.details,
+            judge,
             textvariable=self.rule_var,
             fg=PANEL_MUTED,
-            bg=PANEL,
+            bg=SHEET,
             font=FONT_MUTED,
             justify="left",
             anchor="w",
@@ -226,91 +230,91 @@ class App:
         ).pack(fill="x", pady=(0, 4))
         self.detail_var = tk.StringVar(value="")
         tk.Label(
-            self.details,
+            judge,
             textvariable=self.detail_var,
             fg=PANEL_FG,
-            bg=PANEL,
+            bg=SHEET,
             font=FONT_TEXT,
             justify="left",
             anchor="w",
             wraplength=PANEL_WRAP,
         ).pack(fill="x")
 
-        self._section(self.details, "分段")
+        hops = self._section(self.details, "分段", OK)
         self.gw_title = tk.StringVar(value="电脑 → 路由器")
         self.gw_stat = tk.StringVar(value="等待")
-        self._stat_block(self.details, self.gw_title, self.gw_stat)
+        self._stat_block(hops, self.gw_title, self.gw_stat)
         self.inet_title = tk.StringVar(value=f"路由器 → 互联网    {INTERNET_HOST}")
         self.inet_stat = tk.StringVar(value="等待")
-        self._stat_block(self.details, self.inet_title, self.inet_stat)
+        self._stat_block(hops, self.inet_title, self.inet_stat)
         tk.Label(
-            self.details,
+            hops,
             text="柱子越高越慢，红格是这一轮超时。",
             fg=PANEL_MUTED,
-            bg=PANEL,
+            bg=SHEET,
             font=FONT_MUTED,
             justify="left",
             anchor="w",
             wraplength=PANEL_WRAP,
         ).pack(fill="x", pady=(2, 0))
-        self.spark = tk.Canvas(self.details, width=PANEL_WRAP, height=42, bg=PANEL, highlightthickness=0)
+        self.spark = tk.Canvas(hops, width=PANEL_WRAP, height=42, bg=SHEET, highlightthickness=0)
         self.spark.pack(fill="x", pady=(6, 0))
         self.deep_var = tk.StringVar(value="")
         self.deep_label = tk.Label(
-            self.details, textvariable=self.deep_var, fg=PANEL_MUTED, bg=PANEL, font=FONT_MUTED, anchor="w"
+            hops, textvariable=self.deep_var, fg=PANEL_MUTED, bg=SHEET, font=FONT_MUTED, anchor="w"
         )
 
-        self._section(self.details, "无线")
+        wireless = self._section(self.details, "无线", "#5b8def")
         self.wifi_var = tk.StringVar(value="正在读取")
         self.wifi_sub = tk.StringVar(value="")
         tk.Label(
-            self.details,
+            wireless,
             textvariable=self.wifi_var,
             fg=PANEL_FG,
-            bg=PANEL,
-            font=FONT_TEXT,
+            bg=SHEET,
+            font=(FONT, 14, "bold"),
             anchor="w",
             wraplength=PANEL_WRAP,
             justify="left",
         ).pack(fill="x")
         tk.Label(
-            self.details,
+            wireless,
             textvariable=self.wifi_sub,
             fg=PANEL_MUTED,
-            bg=PANEL,
+            bg=SHEET,
             font=FONT_MUTED,
             anchor="w",
             wraplength=PANEL_WRAP,
             justify="left",
-        ).pack(fill="x")
-        self.wifi_extra = tk.Frame(self.details, bg=PANEL)
+        ).pack(fill="x", pady=(2, 0))
+        self.wifi_extra = tk.Frame(wireless, bg=SHEET)
         self.wifi_extra.pack(fill="x")
         self.wifi_hint = tk.StringVar(value="")
         self.wifi_hint_label = tk.Label(
             self.wifi_extra,
             textvariable=self.wifi_hint,
             fg=PANEL_MUTED,
-            bg=PANEL,
+            bg=SHEET,
             font=FONT_MUTED,
             justify="left",
             anchor="w",
             wraplength=PANEL_WRAP,
         )
 
-        self._section(self.details, "拨测")
+        probe = self._section(self.details, "拨测", WARN)
         self.proxy_var = tk.StringVar(value="")
         tk.Label(
-            self.details,
+            probe,
             textvariable=self.proxy_var,
             fg=PANEL_MUTED,
-            bg=PANEL,
+            bg=SHEET,
             font=FONT_MUTED,
             anchor="w",
             wraplength=PANEL_WRAP,
             justify="left",
         ).pack(fill="x")
-        self.site_box = tk.Frame(self.details, bg=PANEL)
-        self.site_box.pack(fill="x", pady=(2, 0))
+        self.site_box = tk.Frame(probe, bg=SHEET)
+        self.site_box.pack(fill="x", pady=(6, 0))
 
         self.actions = tk.Frame(self.body, bg=CARD)
         rule = tk.Frame(self.actions, bg=LINE, height=1)
@@ -340,18 +344,33 @@ class App:
         self._sync_buttons()
         self._layout()
 
-    def _section(self, parent: tk.Frame, text: str) -> None:
-        row = tk.Frame(parent, bg=PANEL)
-        row.pack(fill="x", pady=(14, 4))
-        tick = tk.Canvas(row, width=3, height=12, bg=PANEL, highlightthickness=0, bd=0)
-        tick.pack(side="left", padx=(0, 8), pady=1)
-        tick.create_rectangle(0, 0, 3, 12, fill=IDLE, outline="")
-        tk.Label(row, text=text, fg=PANEL_MUTED, bg=PANEL, font=FONT_SECTION).pack(side="left")
+    def _section(self, parent: tk.Frame, text: str, accent: str, first: bool = False) -> tk.Frame:
+        outer = tk.Frame(parent, bg=PANEL)
+        outer.pack(fill="x", pady=(0 if first else 16, 0))
+        shell = tk.Frame(outer, bg=SECTION_EDGE)
+        shell.pack(fill="x")
+        card = tk.Frame(shell, bg=SHEET)
+        card.pack(fill="x", padx=1, pady=1)
+        head = tk.Frame(card, bg=SECTION_HEAD)
+        head.pack(fill="x")
+        mark = tk.Frame(head, bg=accent, width=4)
+        mark.pack(side="left", fill="y")
+        mark.pack_propagate(False)
+        tk.Label(head, text=text, fg=PANEL_FG, bg=SECTION_HEAD, font=(FONT, 13, "bold")).pack(
+            side="left", padx=(10, 8), pady=8
+        )
+        body = tk.Frame(card, bg=SHEET)
+        body.pack(fill="x", padx=10, pady=(8, 10))
+        return body
 
     def _stat_block(self, parent: tk.Frame, title: tk.StringVar, stat: tk.StringVar) -> None:
-        tk.Label(parent, textvariable=title, fg=PANEL_FG, bg=PANEL, font=(FONT, 14, "bold"), anchor="w").pack(fill="x")
-        tk.Label(parent, textvariable=stat, fg=PANEL_MUTED, bg=PANEL, font=FONT_MUTED, anchor="w").pack(
-            fill="x", pady=(2, 8)
+        box = tk.Frame(parent, bg=INSET)
+        box.pack(fill="x", pady=(0, 8))
+        tk.Label(box, textvariable=title, fg=PANEL_FG, bg=INSET, font=(FONT, 13, "bold"), anchor="w").pack(
+            fill="x", padx=8, pady=(6, 0)
+        )
+        tk.Label(box, textvariable=stat, fg=PANEL_MUTED, bg=INSET, font=FONT_MUTED, anchor="w").pack(
+            fill="x", padx=8, pady=(2, 6)
         )
 
     def _button(
@@ -503,16 +522,19 @@ class App:
             self._site_signature = signature
             self._site_values = []
             if not rows:
-                tk.Label(self.site_box, text="等待这一轮拨测", fg=PANEL_MUTED, bg=PANEL, font=FONT_MUTED).pack(anchor="w")
+                tk.Label(self.site_box, text="等待这一轮拨测", fg=PANEL_MUTED, bg=SHEET, font=FONT_MUTED).pack(anchor="w")
                 return
             for name, text, color, address in rows:
-                row = tk.Frame(self.site_box, bg=PANEL)
-                row.pack(fill="x", pady=(2, 1))
-                top = tk.Frame(row, bg=PANEL)
+                row = tk.Frame(self.site_box, bg=SHEET)
+                row.pack(fill="x", pady=(3, 2))
+                top = tk.Frame(row, bg=SHEET)
                 top.pack(fill="x")
-                tk.Label(top, text=name, fg=PANEL_FG, bg=PANEL, font=FONT_TEXT).pack(side="left")
+                dot = tk.Canvas(top, width=8, height=8, bg=SHEET, highlightthickness=0, bd=0)
+                dot.pack(side="left", padx=(0, 6), pady=5)
+                mark = dot.create_oval(0, 0, 8, 8, fill=color, outline="")
+                tk.Label(top, text=name, fg=PANEL_FG, bg=SHEET, font=FONT_TEXT).pack(side="left")
                 value = tk.StringVar(value=text)
-                value_label = tk.Label(top, textvariable=value, fg=color, bg=PANEL, font=FONT_TEXT)
+                value_label = tk.Label(top, textvariable=value, fg=color, bg=SHEET, font=FONT_TEXT)
                 value_label.pack(side="right")
                 address_var = None
                 if address:
@@ -521,19 +543,20 @@ class App:
                         row,
                         textvariable=address_var,
                         fg=PANEL_MUTED,
-                        bg=PANEL,
+                        bg=SHEET,
                         font=FONT_MUTED,
                         anchor="w",
                         justify="left",
-                        wraplength=self._detail_text_width,
-                    ).pack(fill="x")
-                self._site_values.append((value, value_label, address_var))
+                        wraplength=self._copy_width(),
+                    ).pack(fill="x", padx=(14, 0))
+                self._site_values.append((value, value_label, address_var, dot, mark))
             return
-        for (value, value_label, address_var), (_name, text, color, address) in zip(self._site_values, rows):
+        for (value, value_label, address_var, dot, mark), (_name, text, color, address) in zip(self._site_values, rows):
             if value.get() != text:
                 value.set(text)
             if value_label.cget("fg") != color:
                 value_label.configure(fg=color)
+            dot.itemconfigure(mark, fill=color)
             if address_var is not None and address and address_var.get() != address:
                 address_var.set(address)
 
@@ -966,17 +989,21 @@ class App:
         design = int(round(EXPANDED_WIDTH * scale))
         return min(max(content, design), cap)
 
+    def _copy_width(self) -> int:
+        return max(140, self._detail_text_width - 28)
+
     def _apply_detail_width(self, width: int) -> None:
         if width == self._detail_text_width and getattr(self, "_detail_width_ready", False):
             return
         self._detail_width_ready = True
         self._detail_text_width = width
-        self.spark.configure(width=width)
+        copy_width = self._copy_width()
+        self.spark.configure(width=copy_width)
 
         def walk(widget: tk.Misc) -> None:
             for child in widget.winfo_children():
                 if isinstance(child, tk.Label):
-                    child.configure(wraplength=width)
+                    child.configure(wraplength=copy_width)
                 walk(child)
 
         walk(self.details)
