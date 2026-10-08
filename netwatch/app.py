@@ -1124,6 +1124,7 @@ class App:
         radius = PANEL_CORNER
         if not hasattr(self, "_corner_masks"):
             self._corner_masks = {}
+            self._corner_photos = {}
             for key, relx, rely, anchor in (
                 ("nw", 0, 0, "nw"),
                 ("ne", 1, 0, "ne"),
@@ -1134,23 +1135,18 @@ class App:
                     self.detail_host,
                     width=radius,
                     height=radius,
-                    bg=PANEL,
+                    bg=CARD,
                     highlightthickness=0,
                     bd=0,
                 )
                 canvas.place(relx=relx, rely=rely, anchor=anchor)
                 self._corner_masks[key] = canvas
-        boxes = {
-            "nw": (0, 0, radius * 2, radius * 2),
-            "ne": (-radius, 0, radius, radius * 2),
-            "sw": (0, -radius, radius * 2, radius),
-            "se": (-radius, -radius, radius, radius),
-        }
         for key, canvas in self._corner_masks.items():
+            photo = _aa_quarter(radius, CARD, PANEL, key)
+            self._corner_photos[key] = photo
             canvas.configure(width=radius, height=radius)
             canvas.delete("all")
-            canvas.create_rectangle(0, 0, radius, radius, fill=CARD, outline="")
-            canvas.create_oval(*boxes[key], fill=PANEL, outline="")
+            canvas.create_image(0, 0, anchor="nw", image=photo)
             tk.Misc.lift(canvas)
 
 
@@ -1459,36 +1455,109 @@ def _paint_round(canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, radius: 
     )
 
 
+def _top_hwnd(widget: tk.Misc) -> int:
+    user = ctypes.windll.user32
+    user.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
+    user.GetAncestor.restype = wintypes.HWND
+    hwnd = user.GetAncestor(int(widget.winfo_id()), 2)
+    return int(hwnd or 0)
+
+
+def _bgr(color: str) -> int:
+    text = color.lstrip("#")
+    if len(text) != 6:
+        return 0x00141018
+    red = int(text[0:2], 16)
+    green = int(text[2:4], 16)
+    blue = int(text[4:6], 16)
+    return (blue << 16) | (green << 8) | red
+
+
+_QUARTER_CACHE: dict[tuple[int, str, str, str], tk.PhotoImage] = {}
+
+
+def _aa_quarter(size: int, outer: str, inner: str, quadrant: str) -> tk.PhotoImage:
+    """一张抗锯齿的圆角贴片。外侧是窗口底色，内侧是面板色。"""
+    key = (size, outer, inner, quadrant)
+    cached = _QUARTER_CACHE.get(key)
+    if cached is not None:
+        return cached
+    centers = {
+        "nw": (size, size),
+        "ne": (0, size),
+        "sw": (size, 0),
+        "se": (0, 0),
+    }
+    cx, cy = centers[quadrant]
+    scale = 6
+    samples = scale * scale
+    image = tk.PhotoImage(width=size, height=size)
+    for y in range(size):
+        row = []
+        for x in range(size):
+            hit = 0
+            for sy in range(scale):
+                for sx in range(scale):
+                    px = x + (sx + 0.5) / scale
+                    py = y + (sy + 0.5) / scale
+                    dx = px - cx
+                    dy = py - cy
+                    if dx * dx + dy * dy <= size * size:
+                        hit += 1
+            row.append(_mix(outer, inner, hit / samples))
+        image.put("{" + " ".join(row) + "}", to=(0, y))
+    _QUARTER_CACHE[key] = image
+    return image
+
+
 def _round_window(widget: tk.Misc, radius: int) -> None:
+    """用系统合成的圆角。区域裁剪只有实心和透明，大屏幕上边缘会锯齿。"""
     try:
-        user = ctypes.windll.user32
-        gdi = ctypes.windll.gdi32
-        user.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
-        user.GetAncestor.restype = wintypes.HWND
-        user.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-        user.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
-        user.SetWindowRgn.restype = wintypes.BOOL
-        gdi.CreateRoundRectRgn.restype = wintypes.HRGN
-        hwnd = user.GetAncestor(wintypes.HWND(int(widget.winfo_id())), 2)
+        hwnd = _top_hwnd(widget)
         if not hwnd:
-            hwnd = wintypes.HWND(int(widget.winfo_id()))
-        rect = wintypes.RECT()
-        if not user.GetWindowRect(hwnd, ctypes.byref(rect)):
             return
-        width = int(rect.right - rect.left)
-        height = int(rect.bottom - rect.top)
-        if width < 8 or height < 8:
+        key = (hwnd, max(int(radius), 1))
+        if getattr(widget, "_corner_key", None) == key:
             return
-        key = (int(hwnd), width, height, radius)
-        if getattr(widget, "_region_key", None) == key:
+        user = ctypes.windll.user32
+        user.SetWindowRgn.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.BOOL]
+        user.SetWindowRgn.restype = wintypes.BOOL
+        user.SetWindowRgn(hwnd, None, True)
+        dwm = ctypes.windll.dwmapi
+        dwm.DwmSetWindowAttribute.argtypes = [wintypes.HWND, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+        dwm.DwmSetWindowAttribute.restype = ctypes.c_long
+        preference = ctypes.c_int(2)
+        result = dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(preference), ctypes.sizeof(preference))
+        if result != 0:
+            _region_round(hwnd, radius)
             return
-        region = gdi.CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2)
-        if not region:
-            return
-        if user.SetWindowRgn(hwnd, region, True):
-            widget._region_key = key
+        try:
+            border = ctypes.c_uint(_bgr(str(widget.cget("bg"))))
+        except tk.TclError:
+            border = ctypes.c_uint(_bgr(CARD))
+        dwm.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border), ctypes.sizeof(border))
+        widget._corner_key = key
     except Exception:
         return
+
+
+def _region_round(hwnd: int, radius: int) -> None:
+    user = ctypes.windll.user32
+    gdi = ctypes.windll.gdi32
+    user.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+    user.SetWindowRgn.restype = wintypes.BOOL
+    gdi.CreateRoundRectRgn.restype = wintypes.HRGN
+    rect = wintypes.RECT()
+    if not user.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return
+    width = int(rect.right - rect.left)
+    height = int(rect.bottom - rect.top)
+    if width < 8 or height < 8:
+        return
+    region = gdi.CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2)
+    if region:
+        user.SetWindowRgn(hwnd, region, True)
 
 
 def _widget_in(widget: tk.Misc, parent: tk.Misc) -> bool:
