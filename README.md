@@ -60,20 +60,20 @@
 
 ## 从源码运行
 
-Windows，Python 3.9 或更高，需要带 tkinter。
+Windows 10 1809 或更新，需要 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)。
 
 ```powershell
-python netwatch.pyw
+dotnet run --project src/NetWatch.App/NetWatch.App.csproj -c Release
 ```
 
 再运行一次会直接退出，避免开出两个窗口。
 
 ## 打包
 
-需要 [Inno Setup 6](https://jrsoftware.org/isinfo.php)。在仓库根目录执行：
+在仓库根目录执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1
+dotnet publish src/NetWatch.App/NetWatch.App.csproj -c Release -r win-x64 --self-contained true
 ```
 
-生成 `dist\NetWatch-Setup.exe`。安装包挂到 GitHub Release，不要把 `dist` 提交进 git。
+生成的程序在 `src\NetWatch.App\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\publish\`。安装包挂到 GitHub Release，不要把 `publish` 或 `bin` 提交进 git。
