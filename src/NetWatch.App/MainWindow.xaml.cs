@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using Microsoft.UI;
-using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -30,8 +29,6 @@ public sealed partial class MainWindow : Window
     private int _originX;
     private int _originY;
     private bool _deepRunning;
-    private DesktopAcrylicController? _acrylic;
-    private SystemBackdropConfiguration? _backdrop;
     private bool _shellReady;
 
     public MainWindow()
@@ -78,39 +75,61 @@ presenter.IsMinimizable = false;
         Win32.HideFromTaskbar(hwnd);
         Win32.RemoveFrame(hwnd);
         Win32.RoundCorners(hwnd);
-        TryAcrylic(hwnd);
+        Win32.ExtendFrame(hwnd);
+        UseTransparentBackdrop();
         Win32.Topmost(hwnd, _settings.Topmost);
         Place(first: true);
         _shellReady = true;
     }
 
-    private void TryAcrylic(IntPtr hwnd)
+    private void UseTransparentBackdrop()
     {
-        if (!DesktopAcrylicController.IsSupported())
+        try
         {
-            Shell.Background = new SolidColorBrush(Color.FromArgb(255, 0x24, 0x2b, 0x3a));
-            return;
+            var options = new DispatcherQueueOptions
+            {
+                dwSize = Marshal.SizeOf<DispatcherQueueOptions>(),
+                threadType = 2,
+                apartmentType = 2,
+            };
+            var hr = CreateDispatcherQueueController(options, out _);
+            if (hr < 0)
+                SettingsStore.Log($"CreateDispatcherQueueController {hr:X8}");
+            var compositor = new Windows.UI.Composition.Compositor();
+            var brush = compositor.CreateColorBrush(Color.FromArgb(0, 0, 0, 0));
+            this.As<Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop>().SystemBackdrop = brush;
         }
-        _backdrop = new SystemBackdropConfiguration
+        catch (Exception ex)
         {
-            IsInputActive = true,
-            Theme = SystemBackdropTheme.Dark,
-        };
-        _acrylic = new DesktopAcrylicController
-        {
-            TintColor = Color.FromArgb(255, 0x24, 0x2b, 0x3a),
-            TintOpacity = 0.82f,
-            LuminosityOpacity = 0.02f,
-            FallbackColor = Color.FromArgb(255, 0x24, 0x2b, 0x3a),
-        };
-        _acrylic.AddSystemBackdropTarget(this.As<Microsoft.UI.Composition.ICompositionSupportsSystemBackdrop>());
-        _acrylic.SetSystemBackdropConfiguration(_backdrop);
-        Activated += (_, e) =>
-        {
-            if (_backdrop is null)
-                return;
-            _backdrop.IsInputActive = e.WindowActivationState != WindowActivationState.Deactivated;
-        };
+            SettingsStore.Log(ex.ToString());
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DispatcherQueueOptions
+    {
+        public int dwSize;
+        public int threadType;
+        public int apartmentType;
+    }
+
+    [DllImport("CoreMessaging.dll")]
+    private static extern int CreateDispatcherQueueController(DispatcherQueueOptions options, out IntPtr controller);
+
+    private Microsoft.UI.Composition.CompositionRoundedRectangleGeometry? _cornerClip;
+
+    private void RootSized(object sender, SizeChangedEventArgs e) => SyncRoundedClip(e.NewSize.Width, e.NewSize.Height);
+
+    private void SyncRoundedClip(double width, double height)
+    {
+        if (width <= 0 || height <= 0)
+            return;
+        var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(Root);
+        var compositor = visual.Compositor;
+        _cornerClip ??= compositor.CreateRoundedRectangleGeometry();
+        _cornerClip.CornerRadius = new System.Numerics.Vector2(16, 16);
+        _cornerClip.Size = new System.Numerics.Vector2((float)width, (float)height);
+        visual.Clip ??= compositor.CreateGeometricClip(_cornerClip);
     }
 
     private void Loop()
@@ -357,7 +376,6 @@ presenter.IsMinimizable = false;
         AppWindow.Resize(new SizeInt32(width, height));
         if (first)
             AppWindow.Move(new PointInt32(x, y));
-        Win32.ClipRounded(Win32.Hwnd(this), 16);
     }
 
     private int ContentWidth()
@@ -655,10 +673,11 @@ internal static class Win32
     public static void HideFromTaskbar(IntPtr hwnd)
     {
         const int style = -20;
-        var ex = GetWindowLong(hwnd, style);
+        var ex = GetWindowLongPtr(hwnd, style).ToInt64();
         ex |= 0x00000080;
+        ex |= 0x00200000;
         ex &= ~0x00040000;
-        SetWindowLong(hwnd, style, ex);
+        SetWindowLongPtr(hwnd, style, new IntPtr(ex));
     }
 
     public static void RoundCorners(IntPtr hwnd)
@@ -681,12 +700,105 @@ internal static class Win32
         SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020);
     }
 
-    public static void ClipRounded(IntPtr hwnd, int radius)
+    private static CreateWindowExDelegate? _createWindow;
+    private static CreateWindowExDelegate? _createWindowHook;
+
+    // The rounded silhouette needs per-pixel alpha, and that flag is only honored when the window is created.
+    public static void EnableTransparentCreation()
     {
-        if (!GetClientRect(hwnd, out var rect))
+        try
+        {
+            _createWindowHook = CreateWindowExFiltered;
+            PatchCreateWindow("Microsoft.ui.xaml.dll");
+            PatchCreateWindow("Microsoft.UI.Windowing.Core.dll");
+        }
+        catch (Exception ex)
+        {
+            SettingsStore.Log(ex.ToString());
+        }
+    }
+
+    private static IntPtr CreateWindowExFiltered(
+        uint exStyle, IntPtr className, IntPtr windowName, uint style,
+        int x, int y, int width, int height,
+        IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param)
+    {
+        if (parent == IntPtr.Zero && className.ToInt64() > 0xFFFF)
+        {
+            var name = Marshal.PtrToStringUni(className) ?? "";
+            if (name.Contains("WinUIDesktop", StringComparison.Ordinal))
+                exStyle |= 0x00200000;
+        }
+        return _createWindow!(exStyle, className, windowName, style, x, y, width, height, parent, menu, instance, param);
+    }
+
+    private static void PatchCreateWindow(string moduleName)
+    {
+        var module = GetModuleHandle(moduleName);
+        if (module == IntPtr.Zero)
             return;
-        var region = CreateRoundRectRgn(0, 0, rect.Right + 1, rect.Bottom + 1, radius * 2, radius * 2);
-        SetWindowRgn(hwnd, region, true);
+        var pe = module + Marshal.ReadInt32(module, 0x3C);
+        if (Marshal.ReadInt16(pe, 24) != 0x20B)
+            return;
+        var importRva = Marshal.ReadInt32(pe, 24 + 120);
+        if (importRva == 0)
+            return;
+        var descriptor = module + importRva;
+        while (true)
+        {
+            var nameRva = Marshal.ReadInt32(descriptor, 12);
+            if (nameRva == 0)
+                break;
+            var dll = Marshal.PtrToStringAnsi(module + nameRva);
+            if (string.Equals(dll, "USER32.dll", StringComparison.OrdinalIgnoreCase))
+                PatchCreateWindowSlot(module, descriptor);
+            descriptor += 20;
+        }
+    }
+
+    private static void PatchCreateWindowSlot(IntPtr module, IntPtr descriptor)
+    {
+        var original = Marshal.ReadInt32(descriptor, 0);
+        var first = Marshal.ReadInt32(descriptor, 16);
+        if (original == 0 || first == 0)
+            return;
+        for (var index = 0; ; index++)
+        {
+            var entry = Marshal.ReadInt64(module + original, index * 8);
+            if (entry == 0)
+                break;
+            if (entry < 0)
+                continue;
+            var importName = Marshal.PtrToStringAnsi(module + (int)entry + 2);
+            if (importName != "CreateWindowExW")
+                continue;
+            var slot = module + first + index * 8;
+            var current = Marshal.ReadIntPtr(slot);
+            _createWindow ??= Marshal.GetDelegateForFunctionPointer<CreateWindowExDelegate>(current);
+            VirtualProtect(slot, (UIntPtr)8, 0x40, out var old);
+            Marshal.WriteIntPtr(slot, Marshal.GetFunctionPointerForDelegate(_createWindowHook!));
+            VirtualProtect(slot, (UIntPtr)8, old, out _);
+            return;
+        }
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate IntPtr CreateWindowExDelegate(
+        uint exStyle, IntPtr className, IntPtr windowName, uint style,
+        int x, int y, int width, int height,
+        IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string name);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool VirtualProtect(IntPtr address, UIntPtr size, uint protect, out uint old);
+
+    public static void ExtendFrame(IntPtr hwnd)
+    {
+        var margins = new MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        DwmExtendFrameIntoClientArea(hwnd, ref margins);
+        SetWindowRgn(hwnd, IntPtr.Zero, true);
     }
 
     public static void Topmost(IntPtr hwnd, bool on) =>
@@ -714,20 +826,17 @@ internal static class Win32
     private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll")]
-    private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
-
-    [DllImport("gdi32.dll")]
-    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
-
-    [DllImport("user32.dll")]
     private static extern int SetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
 
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS margins);
+
     [StructLayout(LayoutKind.Sequential)]
-    private struct RECT
+    private struct MARGINS
     {
         public int Left;
-        public int Top;
         public int Right;
+        public int Top;
         public int Bottom;
     }
 

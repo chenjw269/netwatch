@@ -3,8 +3,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="NetWatch">
-    <Grid Background="#FF242b3a">
-    <Border x:Name="Shell" Background="#CC242b3a" BorderThickness="0" CornerRadius="16" Padding="16,12">
+    <Grid x:Name="Root" Background="Transparent" SizeChanged="RootSized">
+    <Border x:Name="Shell" Background="#FF242b3a" BorderThickness="0" CornerRadius="16" Padding="16,12">
         <Grid>
             <StackPanel x:Name="MiniBar" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Collapsed">
                 <Button x:Name="RestoreButton" Style="{StaticResource Pill}" Content="还原" Padding="16,6" HorizontalAlignment="Left" Click="ToggleMini" />

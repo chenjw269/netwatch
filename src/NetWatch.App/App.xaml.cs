@@ -34,6 +34,7 @@ public partial class NetWatchApp : Application
         {
             // 优先级降不下来也不影响检测。
         }
+        Win32.EnableTransparentCreation();
         _window = new MainWindow();
         _window.Activate();
     }
