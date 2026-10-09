@@ -214,17 +214,30 @@ class DiagnoseTests(unittest.TestCase):
             )
         )
         self.assertEqual(found.level, "bad")
-        self.assertEqual(found.title, "本地无线或路由器")
-        self.assertIn("两边同时超时", found.detail)
+        self.assertEqual(found.title, "电脑→路由器 链路不通")
+        self.assertIn("两段同时无响应", found.detail)
 
     def test_internet_only_is_isp(self) -> None:
         found = diagnose(snap(internet_ping=ping("223.5.5.5", 1, loss=100)))
-        self.assertEqual(found.title, "路由器或运营商")
-        self.assertIn("网关一直通", found.detail)
+        self.assertEqual(found.title, "路由器→互联网 链路不通")
+        self.assertIn("持续收到回复", found.detail)
 
     def test_gateway_only_is_wifi(self) -> None:
+        found = diagnose(snap(gateway_ping=ping("192.168.1.1", 8, loss=75)))
+        self.assertEqual(found.level, "bad")
+        self.assertEqual(found.title, "电脑→路由器 链路不通")
+
+    def test_silent_gateway_with_internet_is_forwarding(self) -> None:
         found = diagnose(snap(gateway_ping=ping("192.168.1.1", 1, loss=100)))
-        self.assertEqual(found.title, "Wi-Fi 或路由器")
+        self.assertEqual(found.level, "ok")
+        self.assertEqual(found.title, "网络正常")
+        self.assertIn("不回应 ping 测试请求", found.detail)
+        self.assertIn("800", found.detail)
+        self.assertIn("未测得延迟", found.detail)
+        self.assertIn("1. ", found.detail)
+        self.assertIn("\n2. ", found.detail)
+        self.assertIn("\n3. ", found.detail)
+        self.assertIn("路由器当前可正常转发，但不回应 ping 测试请求。", found.detail)
 
     def test_jitter(self) -> None:
         found = diagnose(
@@ -233,13 +246,13 @@ class DiagnoseTests(unittest.TestCase):
                 internet_ping=ping("223.5.5.5", 20, maximum=180),
             )
         )
-        self.assertEqual(found.title, "延迟抖动")
+        self.assertEqual(found.title, "路由器→互联网 链路抖动")
         self.assertIn("最长", found.detail)
 
     def test_24ghz_interference(self) -> None:
         found = diagnose(snap(internet_ping=ping("223.5.5.5", 20, maximum=180)))
-        self.assertEqual(found.title, "疑似 2.4GHz 干扰")
-        self.assertIn("信号本身不弱", found.detail)
+        self.assertEqual(found.title, "电脑→路由器 2.4GHz 干扰")
+        self.assertIn("信号强度并不弱", found.detail)
         self.assertIn("CMCC-affp", found.detail)
 
     def test_stable_24ghz_stays_ok(self) -> None:
@@ -248,22 +261,42 @@ class DiagnoseTests(unittest.TestCase):
         self.assertEqual(found.level, "ok")
         self.assertEqual(found.rule, "两边都通，延迟稳定，没有丢包")
         self.assertIn("到路由器（192.168.1.1）", found.detail)
-        self.assertIn("和到互联网（223.5.5.5）都有回复，延迟稳定，没有丢包。", found.detail)
+        self.assertIn("到互联网（223.5.5.5）", found.detail)
+        self.assertIn("未出现丢包", found.detail)
+        self.assertIn("\n2. ", found.detail)
 
     def test_internet_loss(self) -> None:
         found = diagnose(snap(internet_ping=ping("223.5.5.5", 22, loss=25)))
-        self.assertEqual(found.title, "外网有丢包")
+        self.assertEqual(found.title, "路由器→互联网 链路丢包")
         self.assertIn("25%", found.detail)
 
     def test_weak_signal(self) -> None:
         found = diagnose(
             snap(wifi=WifiInfo(ssid="x", band="2.4 GHz", signal=30, rssi=-82, connected=True))
         )
-        self.assertEqual(found.title, "无线信号偏弱")
+        self.assertEqual(found.title, "电脑→路由器 信号偏弱")
 
     def test_no_gateway(self) -> None:
         found = diagnose(snap(lan_gateway=""))
-        self.assertEqual(found.title, "没有找到路由器")
+        self.assertEqual(found.title, "电脑→路由器 未连接")
+
+    def test_proxy_ok_is_its_own_point(self) -> None:
+        sites = [
+            SiteProbe("百度", True, 40, "", False),
+            SiteProbe("Google", True, 180, "", True),
+            SiteProbe("Cloudflare", True, 220, "", True),
+        ]
+        found = diagnose(
+            snap(
+                gateway_ping=ping("192.168.102.1", 1, loss=100),
+                internet_ping=ping("223.5.5.5", 18),
+                sites=sites,
+                proxy=ProxyState(system_enabled=True, server="127.0.0.1:7890"),
+            )
+        )
+        self.assertEqual(found.title, "网络正常")
+        self.assertIn("\n4. 网络代理已开启，国外网站可正常访问。", found.detail)
+        self.assertNotIn("国外网站有回应", found.detail)
 
     def test_one_slow_foreign_site_does_not_blame_the_proxy(self) -> None:
         sites = [
@@ -277,6 +310,7 @@ class DiagnoseTests(unittest.TestCase):
         )
         self.assertEqual(found.title, "网络正常")
         self.assertIn("Google", found.detail)
+        self.assertIn("其余国外站点访问正常", found.detail)
 
     def test_all_foreign_sites_slow(self) -> None:
         sites = [
@@ -300,7 +334,7 @@ class DiagnoseTests(unittest.TestCase):
         off = diagnose(snap(sites=sites, proxy=ProxyState()))
         self.assertEqual(off.title, "网络正常")
         on = diagnose(snap(sites=sites, proxy=ProxyState(system_enabled=True, server="127.0.0.1:7897")))
-        self.assertEqual(on.title, "代理没有接通国外")
+        self.assertEqual(on.title, "代理网络不通")
 
     def test_dns_when_ping_ok(self) -> None:
         sites = [
@@ -313,7 +347,7 @@ class DiagnoseTests(unittest.TestCase):
     def test_link_down_is_not_replaced_by_sites(self) -> None:
         sites = [SiteProbe("百度", False, None, "超时", False)]
         found = diagnose(snap(internet_ping=ping("223.5.5.5", 1, loss=100), sites=sites))
-        self.assertEqual(found.title, "路由器或运营商")
+        self.assertEqual(found.title, "路由器→互联网 链路不通")
 
     def test_tun_does_not_blame_isp(self) -> None:
         found = diagnose(
@@ -323,7 +357,7 @@ class DiagnoseTests(unittest.TestCase):
                 internet_ping=ping("223.5.5.5", 1, loss=100),
             )
         )
-        self.assertNotEqual(found.title, "路由器或运营商")
+        self.assertEqual(found.title, "路由器→互联网 没有回应")
         self.assertIn("隧道", found.detail)
 
 

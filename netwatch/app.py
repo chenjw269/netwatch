@@ -149,25 +149,27 @@ class App:
     def _build(self) -> None:
         self.shell = tk.Frame(self.root, bg=CARD)
         self.shell.pack(fill="both", expand=True, padx=1, pady=1)
-        self.dock_rail = tk.Frame(self.shell, bg=CARD)
-        self.dock_rail.pack(side="left", fill="y", padx=(12, 8), pady=14)
-        self.dock = _Dock(self.dock_rail)
-        self.dock.pack(anchor="n")
-        self.dock.bind("<ButtonRelease-1>", lambda _event: self._toggle_mini())
         self.body = tk.Frame(self.shell, bg=CARD, padx=16, pady=14)
-        self.body.pack(side="left", fill="both", expand=True)
+        self.body.pack(fill="both", expand=True)
 
         self.header = tk.Frame(self.body, bg=CARD)
         self.header.pack(fill="x")
-        self.dot = tk.Canvas(self.header, width=22, height=22, bg=CARD, highlightthickness=0)
-        self.dot.pack(side="left", pady=2)
+        # 还原后：左边是按钮，右边是状态和链路说明，说明文字互相左对齐。
+        self.summary = tk.Frame(self.body, bg=CARD)
+        self.button_col = tk.Frame(self.summary, bg=CARD)
+        self.rest = tk.Frame(self.summary, bg=CARD)
+        self.text_col = tk.Frame(self.summary, bg=CARD)
+        self.status_row = tk.Frame(self.text_col, bg=CARD)
+        self.dock = _Dock(self.body)
+        self.dock.bind("<ButtonRelease-1>", lambda _event: self._toggle_mini())
+        self.dot = tk.Canvas(self.body, width=22, height=22, bg=CARD, highlightthickness=0)
         self._glow_id = self.dot.create_oval(1, 1, 21, 21, outline=_mix(CARD, IDLE, 0.55), width=1)
         self._ring_id = self.dot.create_oval(4, 4, 18, 18, outline=IDLE, width=2)
         self._dot_id = self.dot.create_oval(8, 8, 14, 14, fill=IDLE, outline="")
         self.title_var = tk.StringVar(value="正在检测")
         self._title_font = tkfont.Font(font=FONT_TITLE)
         self.title_label = tk.Label(
-            self.header,
+            self.body,
             textvariable=self.title_var,
             fg=FG,
             bg=CARD,
@@ -176,11 +178,10 @@ class App:
             justify="left",
             wraplength=240,
         )
-        self.title_label.pack(side="left", padx=(8, 8))
-        self.chevron = self._button(self.header, "展开详情", self.toggle, side="right")
+        self.chevron = self._button(self.body, "展开详情", self.toggle, side="right")
         self.chevron.pack_forget()
         self.latency_var = tk.StringVar(value="…")
-        self.latency = _Readout(self.header)
+        self.latency = _Readout(self.body)
 
         self.sub_var = tk.StringVar(value="先看电脑到路由器，再看到 223.5.5.5")
         self.sub_label = tk.Label(
@@ -210,18 +211,7 @@ class App:
         )
         self.details = tk.Frame(self.detail_view, bg=PANEL)
         self.details.place(x=0, y=0, width=PANEL_WRAP)
-        self.detail_scroll = tk.Scrollbar(
-            self.detail_host,
-            orient="vertical",
-            command=self._on_scrollbar,
-            bg="#6d7586",
-            troughcolor="#d5dbe6",
-            activebackground="#9aa3b5",
-            width=12,
-            bd=0,
-            highlightthickness=0,
-            relief="flat",
-        )
+        self.detail_scroll = _DetailBar(self.detail_host, self._on_scrollbar)
         self.root.bind_all("<MouseWheel>", self._wheel)
 
         judge = self._section(self.details, "诊断结果", IDLE, first=True)
@@ -236,17 +226,37 @@ class App:
             anchor="w",
             wraplength=PANEL_WRAP,
         ).pack(fill="x", pady=(0, 4))
-        self.detail_var = tk.StringVar(value="")
-        tk.Label(
+        self.detail_box = tk.Text(
             judge,
-            textvariable=self.detail_var,
             fg=PANEL_FG,
             bg=SHEET,
             font=FONT_TEXT,
-            justify="left",
-            anchor="w",
-            wraplength=PANEL_WRAP,
-        ).pack(fill="x")
+            wrap="char",
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            padx=0,
+            pady=0,
+            height=1,
+            width=20,
+            cursor="ibeam",
+            insertwidth=1,
+            selectbackground="#d5e2fb",
+            selectforeground=PANEL_FG,
+            inactiveselectbackground="#d5e2fb",
+        )
+        self.detail_box.pack(fill="x", anchor="w")
+        self.detail_box._selectable = True  # type: ignore[attr-defined]
+        self.detail_box.bind("<Key>", self._readonly_key)
+        self.detail_box.bind("<Control-a>", self._select_detail)
+        self.detail_box.bind("<Control-A>", self._select_detail)
+        self.detail_box.bind("<Control-v>", lambda _event: "break")
+        self.detail_box.bind("<Control-V>", lambda _event: "break")
+        self.detail_box.bind("<Control-x>", lambda _event: "break")
+        self.detail_box.bind("<Control-X>", lambda _event: "break")
+        self.detail_box.bind("<<Paste>>", lambda _event: "break")
+        self.detail_box.bind("<<Cut>>", lambda _event: "break")
+        self.detail_box.bind("<Button-2>", lambda _event: "break")
 
         hops = self._section(self.details, "链路测试", OK)
         self.gw_title = tk.StringVar(value="电脑 → 路由器")
@@ -466,7 +476,7 @@ class App:
             self.proxy_var.set(_proxy_text(snapshot.proxy))
             self._fill_sites(snapshot)
             self.rule_var.set(f"命中规则：{found.rule}" if found.rule else "")
-            self.detail_var.set(found.detail)
+            self._set_detail_text(found.detail)
             self._push_history(snapshot)
             self._draw_history()
             self._fit_title()
@@ -506,7 +516,7 @@ class App:
         if wifi.rx_mbps is not None:
             signal.append(f"速率 {wifi.rx_mbps:g} Mbps")
         self.wifi_sub.set("\n".join(part for part in (" · ".join(bits), " · ".join(signal)) if part))
-        if wifi.band and "2.4" in wifi.band and found.title != "疑似 2.4GHz 干扰":
+        if wifi.band and "2.4" in wifi.band and found.title != "电脑→路由器 2.4GHz 干扰":
             strong = (wifi.signal is not None and wifi.signal >= 70) or (
                 wifi.rssi is not None and wifi.rssi >= -65
             )
@@ -543,8 +553,8 @@ class App:
                 mark = dot.create_oval(0, 0, 8, 8, fill=color, outline="")
                 tk.Label(top, text=name, fg=PANEL_FG, bg=SHEET, font=FONT_TEXT).pack(side="left")
                 value = tk.StringVar(value=text)
-                value_label = tk.Label(top, textvariable=value, fg=color, bg=SHEET, font=FONT_TEXT)
-                value_label.pack(side="right")
+                value_label = tk.Label(top, textvariable=value, fg=color, bg=SHEET, font=FONT_TEXT, anchor="e")
+                value_label.pack(side="right", padx=(8, 4))
                 address_var = None
                 if address:
                     address_var = tk.StringVar(value=address)
@@ -617,65 +627,101 @@ class App:
             color = OK if value < 80 else WARN if value < 150 else BAD
             _round_bar(canvas, x0, floor - bar, x1, floor, color)
 
-    def _layout(self) -> None:
+    def _layout_all(self) -> None:
         self.sub_label.pack_forget()
         self.chevron.pack_forget()
+        self.dock.pack_forget()
+        self.summary.pack_forget()
+        self.status_row.pack_forget()
+        self.header.pack_forget()
+        self.dot.pack_forget()
         self.latency.pack_forget()
         self.title_label.pack_forget()
         self.divider.pack_forget()
         self.detail_host.pack_forget()
         self.actions.pack_forget()
+        self.dock.set_span(None)
+        self.chevron.set_span(None)
+        self._summary_ready = False
         if self.mini:
             self.dock.configure(text="还原")
-            self.dock_rail.pack_configure(padx=(10, 8), pady=8)
-            self.body.configure(padx=12, pady=8)
-            self.latency.pack(side="right", padx=(8, 14))
-            self.title_label.pack(side="left", padx=(8, 8))
+            self.body.configure(padx=8, pady=8)
+            self.header.pack(fill="x")
+            self.dock.pack(in_=self.header, side="left", anchor="center", padx=(0, 6))
+            self.dot.pack(in_=self.header, side="left", anchor="center")
+            self.latency.pack(in_=self.header, side="right", anchor="center", padx=(4, 0))
+            self.title_label.pack(in_=self.header, side="left", anchor="center", padx=(6, 2))
             self._sync_latency_style()
             self._fit_title()
             return
-        self.dock.configure(text="小窗")
-        self.dock_rail.pack_configure(padx=(12, 8), pady=14)
-        self.body.configure(padx=16, pady=14)
-        self.chevron.pack(side="right", padx=(12, 2))
-        self.latency.pack(side="right", padx=(8, 8))
-        self.title_label.pack(side="left", padx=(8, 8), fill="x", expand=True)
-        self.sub_label.pack(fill="x", pady=(8, 0))
+        self.dock.configure(text="小窗显示")
+        self.chevron.configure(text="收起详情" if self.expanded else "展开详情")
+        span = self._paired_span()
+        self.dock.set_span(span)
+        self.chevron.set_span(span)
+        # 收起和展开用同一套边距。这里一变，上面的说明就会整块挪一下。
+        self.body.configure(padx=16, pady=12)
+        self.summary.pack(fill="x")
+        self.button_col.pack(side="left", anchor="n", padx=(0, 12))
+        self.rest.pack(side="left", fill="x", expand=True)
+        self.text_col.grid_forget()
+        # 说明贴在按钮右侧，展开后多余宽度留在右边，不把文字推到中间。
+        self.text_col.pack(in_=self.rest, side="left", anchor="nw")
+        self.dock.pack(in_=self.button_col, side="top", anchor="w")
+        self.chevron.pack(in_=self.button_col, side="top", anchor="w", pady=(6, 0))
+        self.status_row.pack(anchor="w")
+        self.dot.pack(in_=self.status_row, side="left", anchor="center")
+        self.title_label.pack(in_=self.status_row, side="left", anchor="center", padx=(6, 2))
+        self.latency.pack(in_=self.status_row, side="left", anchor="center", padx=(4, 0))
+        # 链路说明和绿色圆点左对齐。展开后整块落在按钮右侧空白的中间。
+        self.sub_label.pack(in_=self.text_col, anchor="w", pady=(8, 0))
+        self._summary_ready = True
         if self.expanded:
             self.divider.pack(fill="x", pady=(10, 8))
             self.detail_host.pack(fill="x")
             self.actions.pack(fill="x", pady=(8, 0))
-            self.chevron.configure(text="收起详情")
             self._fit_details()
-        else:
-            self.chevron.configure(text="展开详情")
         self._sync_latency_style()
         self._fit_title()
 
+    def _layout(self) -> None:
+        # 展开/收起时按钮和说明还在，只切换详情，避免整页拆掉再装回来。
+        if not self.mini and getattr(self, "_summary_ready", False) and self.summary.winfo_ismapped():
+            self._sync_expanded()
+            return
+        self._layout_all()
+
+    def _sync_expanded(self) -> None:
+        self.chevron.configure(text="收起详情" if self.expanded else "展开详情")
+        span = self._paired_span()
+        self.dock.set_span(span)
+        self.chevron.set_span(span)
+        self.divider.pack_forget()
+        self.detail_host.pack_forget()
+        self.actions.pack_forget()
+        if self.expanded:
+            self.divider.pack(fill="x", pady=(10, 8))
+            self.detail_host.pack(fill="x")
+            self.actions.pack(fill="x", pady=(8, 0))
+            self._fit_details()
+        self._sync_latency_style()
+
+    def _paired_span(self) -> int:
+        linespace = max(self.chevron._font.metrics("linespace"), 16)
+        dock_w = max(self.dock._font.measure(label) for label in ("小窗显示", "还原")) + 16
+        pill_w = max(self.chevron._font.measure(label) for label in ("展开详情", "收起详情")) + linespace + 10
+        return max(dock_w, pill_w)
+
     def _sync_latency_style(self) -> None:
         text = self.latency_var.get()
-        # 毫秒数字保持大号；「超时」「…」和结论用同一字号。
-        font = FONT_LATENCY if text[:1].isdigit() else FONT_TITLE
-        self._latency_font = font
-        self.latency.configure(text=text, font=font)
+        # 毫秒和「网络正常」同一字号，并像小窗那样紧挨在标题右边。
+        self._latency_font = FONT_TITLE
+        self.latency.configure(compact=True, text=text, font=FONT_TITLE)
 
     def _fit_title(self) -> None:
         natural = max(int(self._title_font.measure(self.title_var.get())), 48)
         scale = _ui_scale(self.root)
-        if self.mini or not self.expanded:
-            # 收起时按文字本身排成一行，窗口跟着变窄，不再留出一大段空白。
-            width = min(natural, int(460 * scale))
-        else:
-            if not self.title_label.winfo_ismapped():
-                return
-            header = self.header.winfo_width()
-            if header < 80:
-                return
-            used = 16
-            for widget, gap in ((self.dot, 8), (self.latency, 20), (self.chevron, 16)):
-                if widget.winfo_ismapped():
-                    used += max(widget.winfo_reqwidth(), 1) + gap
-            width = max(int(160 * scale), header - used)
+        width = min(natural, int(460 * scale))
         current = int(float(self.title_label.cget("wraplength")))
         if abs(current - width) > 2:
             self.title_label.configure(wraplength=width)
@@ -687,8 +733,7 @@ class App:
         self.mini = mini
         self.settings["mini"] = mini
         self._persist()
-        self._layout()
-        self._place(first=False)
+        self._redraw_layout()
 
     def toggle(self) -> None:
         if self.mini:
@@ -697,8 +742,16 @@ class App:
         self.expanded = not self.expanded
         self.settings["expanded"] = self.expanded
         self._persist()
-        self._layout()
-        self._place(first=False)
+        self._redraw_layout()
+
+    def _redraw_layout(self) -> None:
+        hwnd = _top_hwnd(self.root)
+        _set_redraw(hwnd, True)
+        try:
+            self._layout()
+            self._place(first=False)
+        finally:
+            _set_redraw(hwnd, False)
 
     def _toggle_pause(self) -> None:
         paused = not self._paused.is_set()
@@ -938,9 +991,12 @@ class App:
                 return
             self._close_menu()
             return
-        if getattr(event.widget, "_is_pill", False) or getattr(event.widget, "_is_dock", False) or isinstance(
-            event.widget, (tk.Button, tk.Scrollbar)
-        ):
+        if getattr(event.widget, "_selectable", False):
+            self._ignore_click = True
+            return
+        if getattr(event.widget, "_is_pill", False) or getattr(event.widget, "_is_dock", False) or getattr(
+            event.widget, "_is_scroll", False
+        ) or isinstance(event.widget, (tk.Button, tk.Scrollbar)):
             self._ignore_click = True
             return
         self._ignore_click = False
@@ -982,17 +1038,24 @@ class App:
             log_error(traceback.format_exc())
 
     def _detail_inner_width(self, reserve_scroll: bool) -> int:
-        host = self.detail_host.winfo_width()
         scale = _ui_scale(self.root)
-        if host < 80:
-            host = max(int(300 * scale), self._window_width() - int(140 * scale))
-        used = 16
+        # 按即将使用的窗口宽度算，不先把窗口拉过去再量。中途改大小会闪一帧。
+        side = 34 if self.expanded and not self.mini else 18
+        host = self._window_width() - side
+        actual = self.detail_host.winfo_width()
+        if actual > 80 and abs(actual - host) < 40:
+            host = actual
+        # 白卡片左右有圆角留白。滚动条在右侧。再留一点，避免「58 ms」的 s 被切掉。
+        inset = PANEL_CORNER * 2 + 8
         if reserve_scroll:
-            used += 28
-        return max(int(180 * scale), host - used)
+            inset += 14 + 4 + 12
+        return max(int(180 * scale), host - inset)
 
     def _window_width(self) -> int:
         """收起时贴着内容；展开时用同一套物理宽度，并限制在屏幕以内。"""
+        locked = getattr(self, "_layout_width", None)
+        if locked:
+            return int(locked)
         scale = _ui_scale(self.root)
         screen_w = max(int(self.root.winfo_screenwidth()), 800)
         content = max(int(self.shell.winfo_reqwidth()), int(180 * scale))
@@ -1002,24 +1065,80 @@ class App:
         design = int(round(EXPANDED_WIDTH * scale))
         return min(max(content, design), cap)
 
+    def _capped_width(self, x: int) -> int:
+        """优先保住窗口左上角。右边不够时变窄，而不是把整窗往左推。"""
+        width = self._window_width()
+        screen_w = max(int(self.root.winfo_screenwidth()), 800)
+        room = screen_w - max(int(x), 0) - 8
+        minimum = int(180 * _ui_scale(self.root))
+        if room >= minimum:
+            width = min(width, room)
+        return width
+
     def _copy_width(self) -> int:
         return max(140, self._detail_text_width - 28)
 
+    def _set_detail_text(self, text: str) -> None:
+        current = self.detail_box.get("1.0", "end-1c")
+        if current == text:
+            return
+        self.detail_box.delete("1.0", "end")
+        if text:
+            self.detail_box.insert("1.0", text)
+
+    def _fit_detail_text(self) -> None:
+        box = self.detail_box
+        box.update_idletasks()
+        shown = box.count("1.0", "end-1c", "displaylines")
+        lines = max(int(shown[0]) if shown else 1, 1)
+        if int(box.cget("height")) != lines:
+            box.configure(height=lines)
+
+    def _select_detail(self, event: tk.Event) -> str:
+        event.widget.tag_add("sel", "1.0", "end-1c")
+        event.widget.mark_set("insert", "end-1c")
+        return "break"
+
+    def _readonly_key(self, event: tk.Event) -> str | None:
+        if event.keysym in {
+            "Left",
+            "Right",
+            "Up",
+            "Down",
+            "Home",
+            "End",
+            "Prior",
+            "Next",
+            "Shift_L",
+            "Shift_R",
+            "Control_L",
+            "Control_R",
+        }:
+            return None
+        if event.state & 0x4 and event.keysym.lower() not in {"v", "x"}:
+            return None
+        return "break"
+
     def _apply_detail_width(self, width: int) -> None:
         if width == self._detail_text_width and getattr(self, "_detail_width_ready", False):
+            self._fit_detail_text()
             return
         self._detail_width_ready = True
         self._detail_text_width = width
         copy_width = self._copy_width()
         self.spark.configure(width=copy_width)
+        self.details.place(x=0, y=-self._scroll_offset, width=width)
+        self._placed_detail_width = width
 
         def walk(widget: tk.Misc) -> None:
             for child in widget.winfo_children():
-                if isinstance(child, tk.Label):
+                # 右侧时延是短标签，不设折行，否则「ms」会被拆开或挤掉。
+                if isinstance(child, tk.Label) and int(child.cget("wraplength")) > 0:
                     child.configure(wraplength=copy_width)
                 walk(child)
 
         walk(self.details)
+        self._fit_detail_text()
 
     def _fit_details(self) -> None:
         if not self.expanded or self.mini:
@@ -1037,7 +1156,7 @@ class App:
             needed = max(self.details.winfo_reqheight(), 1)
             view = min(needed, cap)
             if not self.detail_scroll.winfo_ismapped():
-                self.detail_scroll.pack(side="right", fill="y", padx=(0, 8), pady=12)
+                self.detail_scroll.pack(side="right", fill="y", padx=(4, 12), pady=(20, 16))
         else:
             self.detail_scroll.pack_forget()
         self._content_height = needed
@@ -1086,50 +1205,59 @@ class App:
         self._move_details(self._scroll_offset - notches * 48)
 
     def _place(self, first: bool) -> None:
-        if self.mini:
-            self._sync_latency_style()
-            self._fit_title()
-        self.root.update_idletasks()
-        width = self._window_width()
-        height = max(self.shell.winfo_reqheight(), 52)
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        if first:
-            x = self.settings.get("x")
-            y = self.settings.get("y")
-            if not isinstance(x, int) or not isinstance(y, int):
-                x = screen_w - width - 24
-                y = screen_h - height - 96
-        else:
-            x = self.root.winfo_x()
-            y = self.root.winfo_y()
-        if x < 0 or x > screen_w - 48 or x + width > screen_w - 8:
-            x = max(8, screen_w - width - 24)
-        if y < 0 or y + height > screen_h - 4:
-            y = max(8, screen_h - height - 48)
-        same = (
-            abs(self.root.winfo_width() - width) <= 2
-            and abs(self.root.winfo_height() - height) <= 2
-            and abs(self.root.winfo_x() - x) <= 1
-            and abs(self.root.winfo_y() - y) <= 1
-        )
-        if not same:
-            self.root.geometry(f"{width}x{height}+{x}+{y}")
+        hwnd = _top_hwnd(self.root)
+        _set_redraw(hwnd, True)
+        try:
+            if self.mini:
+                self._sync_latency_style()
+                self._fit_title()
             self.root.update_idletasks()
-        if not self.mini:
-            self._fit_title()
-        if self.expanded and not self.mini:
-            self._fit_details()
-            self.root.update_idletasks()
+            width = self._window_width()
             height = max(self.shell.winfo_reqheight(), 52)
+            screen_w = self.root.winfo_screenwidth()
+            screen_h = self.root.winfo_screenheight()
+            if first:
+                x = self.settings.get("x")
+                y = self.settings.get("y")
+                if not isinstance(x, int) or not isinstance(y, int):
+                    x = screen_w - width - 24
+                    y = screen_h - height - 96
+            else:
+                x = self.root.winfo_x()
+                y = self.root.winfo_y()
+            if not self.mini:
+                self._fit_title()
+            # 先按「左上角不动」定宽度，详情文字按这个宽度折行，避免先画一版再挪一次。
+            self._layout_width = self._capped_width(x) if not first else None
+            width = self._layout_width or width
+            if self.expanded and not self.mini:
+                self._fit_details()
+                self.root.update_idletasks()
+                height = max(self.shell.winfo_reqheight(), 52)
+                overflow = y + height - (screen_h - 4)
+                if overflow > 0 and self._view_height > 160:
+                    self._view_height = max(160, self._view_height - overflow)
+                    self.detail_view.configure(height=self._view_height)
+                    self._move_details(self._scroll_offset if self._max_offset() > 0 else 0)
+                    self.root.update_idletasks()
+                    height = max(self.shell.winfo_reqheight(), 52)
+            self._layout_width = None
+            if x + width > screen_w - 8:
+                x = max(8, screen_w - 8 - width)
+            if x < 0:
+                x = 8
             if y + height > screen_h - 4:
-                y = max(8, screen_h - height - 48)
+                y = max(8, screen_h - 4 - height)
+            if y < 0:
+                y = 8
             self.root.geometry(f"{width}x{height}+{x}+{y}")
-            self.root.update_idletasks()
-        _round_window(self.root, CORNER)
-        _apply_glass(_top_hwnd(self.root))
-        if self.expanded and not self.mini:
-            self._mask_panel_corners()
+            _round_window(self.root, CORNER)
+            _apply_glass(hwnd)
+            if self.expanded and not self.mini:
+                self._mask_panel_corners()
+        finally:
+            self._layout_width = None
+            _set_redraw(hwnd, False)
 
     def _raise(self) -> None:
         self._apply_topmost()
@@ -1223,14 +1351,86 @@ def _proxy_text(proxy: ProxyState) -> str:
     return "未开代理，只测国内网站"
 
 
+class _DetailBar(tk.Canvas):
+    """详情区的竖向滚动条。系统滚动条在白卡片上几乎看不见，这里自己画。"""
+
+    def __init__(self, parent: tk.Misc, command) -> None:
+        super().__init__(parent, width=14, bg=PANEL, highlightthickness=0, bd=0, cursor="hand2")
+        self._is_scroll = True
+        self._command = command
+        self._first = 0.0
+        self._last = 1.0
+        self._hot = False
+        self._drag: tuple[int, float] | None = None
+        self._box = (0, 0, 1, 1.0)
+        self.bind("<Button-1>", self._press)
+        self.bind("<B1-Motion>", self._drag_move)
+        self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<Enter>", lambda _event: self._set_hot(True))
+        self.bind("<Leave>", lambda _event: self._set_hot(False))
+        self.bind("<Configure>", lambda _event: self._redraw())
+
+    def set(self, first: float, last: float) -> None:
+        self._first = float(first)
+        self._last = float(last)
+        self._redraw()
+
+    def _set_hot(self, hot: bool) -> None:
+        if hot == self._hot:
+            return
+        self._hot = hot
+        self._redraw()
+
+    def _geom(self) -> tuple[int, int, int, float]:
+        height = max(int(self.winfo_height()), 1)
+        span = min(max(self._last - self._first, 0.0), 1.0)
+        inner = max(height - 8, 1)
+        thumb = min(inner, max(42, int(round(span * inner))))
+        travel = max(inner - thumb, 1)
+        room = max(1.0 - span, 0.001)
+        top = 4 + int(round((min(max(self._first, 0.0), room) / room) * travel))
+        top = max(4, min(top, 4 + travel))
+        return top, top + thumb, travel, room
+
+    def _redraw(self) -> None:
+        width = 14
+        height = max(int(self.winfo_height()), 1)
+        self.delete("all")
+        _paint_round(self, 1, 2, width - 1, height - 2, 6, fill="#c5cedd")
+        top, bottom, travel, room = self._geom()
+        self._box = (top, bottom, travel, room)
+        if self._last - self._first >= 0.999:
+            return
+        _paint_round(self, 2, top, width - 2, bottom, 5, fill="#2f3e68" if self._hot else "#3d4f92")
+
+    def _press(self, event: tk.Event) -> None:
+        top, bottom, _travel, _room = self._box
+        if event.y < top or event.y > bottom:
+            self._command("scroll", -1 if event.y < top else 1, "pages")
+            return
+        self._drag = (event.y, self._first)
+
+    def _drag_move(self, event: tk.Event) -> None:
+        if self._drag is None:
+            return
+        origin_y, origin_first = self._drag
+        _top, _bottom, travel, room = self._box
+        delta = (event.y - origin_y) / max(travel, 1) * room
+        self._command("moveto", max(0.0, min(1.0, origin_first + delta)))
+
+    def _release(self, _event: tk.Event) -> None:
+        self._drag = None
+
+
 class _Dock(tk.Canvas):
-    """左侧收起按钮。圆角，避免一块方标签贴在窗口边上。"""
+    """收成小窗的按钮。圆角，避免一块方标签贴在窗口边上。"""
 
     def __init__(self, parent: tk.Misc) -> None:
         super().__init__(parent, bg=CARD, highlightthickness=0, bd=0, cursor="hand2")
         self._is_dock = True
-        self._text = "小窗"
+        self._text = "小窗显示"
         self._hot = False
+        self._span: int | None = None
         self._font = tkfont.Font(font=FONT_MUTED)
         self._redraw()
         self.bind("<Enter>", self._enter)
@@ -1249,6 +1449,16 @@ class _Dock(tk.Canvas):
         if kwargs:
             super().configure(**kwargs)
 
+    def natural_width(self) -> int:
+        return self._font.measure(self._text.replace("\n", "")) + 16
+
+    def set_span(self, width: int | None) -> None:
+        width = int(width) if width else None
+        if width == self._span:
+            return
+        self._span = width
+        self._redraw()
+
     def _enter(self, _event: tk.Event) -> None:
         self._hot = True
         self._redraw()
@@ -1261,11 +1471,12 @@ class _Dock(tk.Canvas):
         linespace = max(self._font.metrics("linespace"), 16)
         pad_y = max(8, linespace // 4)
         label = self._text.replace("\n", "")
-        width = self._font.measure(label) + linespace + 10
+        width = self._span or self.natural_width()
         height = linespace + pad_y * 2
         super().configure(width=width, height=height)
         self.delete("all")
-        _paint_round(self, 1, 1, width - 1, height - 1, height // 2, fill=BUTTON_ACTIVE if self._hot else BUTTON)
+        radius = height // 2 if self._span else min(height // 2, 8)
+        _paint_round(self, 1, 1, width - 1, height - 1, radius, fill=BUTTON_ACTIVE if self._hot else BUTTON)
         self.create_text(width / 2, height / 2, text=label, fill=FG, font=self._font)
 
 
@@ -1276,6 +1487,7 @@ class _Readout(tk.Canvas):
         super().__init__(parent, bg=CARD, highlightthickness=0, bd=0)
         self._text = "…"
         self._fg = IDLE
+        self._compact = False
         self._font = tkfont.Font(font=FONT_LATENCY)
         self._slot_font = tkfont.Font(font=FONT_LATENCY)
         self._slot_title = tkfont.Font(font=FONT_TITLE)
@@ -1287,7 +1499,11 @@ class _Readout(tk.Canvas):
         text = kwargs.pop("text", None)
         fg = kwargs.pop("fg", None)
         font = kwargs.pop("font", None)
+        compact = kwargs.pop("compact", None)
         changed = False
+        if compact is not None and bool(compact) != self._compact:
+            self._compact = bool(compact)
+            changed = True
         if text is not None and text != self._text:
             self._text = text
             changed = True
@@ -1310,16 +1526,15 @@ class _Readout(tk.Canvas):
             super().configure(**kwargs)
 
     def _redraw(self) -> None:
-        pad_x = 12
-        pad_y = 5
-        # 「13 ms」和「无回复」共用同一宽度，窗口不会跟着文字长短跳动。
-        needed = max(
-            self._font.measure(self._text),
-            self._slot_font.measure("888 ms"),
-            self._slot_title.measure("无回复"),
-        )
-        width = max(needed + pad_x * 2, 52)
-        height = max(self._slot_font.metrics("linespace") + pad_y * 2, 28)
+        pad_x = 8 if self._compact else 12
+        pad_y = 4
+        needed = self._font.measure(self._text)
+        if not self._compact:
+            # 和标题同一字号，仍留出「888 ms」和「无回复」，避免面板来回变宽。
+            needed = max(needed, self._font.measure("888 ms"), self._font.measure("无回复"))
+        width = max(needed + pad_x * 2, 36 if self._compact else 52)
+        line = self._font.metrics("linespace")
+        height = max(line + pad_y * 2, 24)
         super().configure(width=width, height=height)
         self.delete("all")
         _paint_round(self, 1, 1, width - 1, height - 1, height // 2, fill=_mix(CARD, self._fg, 0.2))
@@ -1349,6 +1564,7 @@ class _Pill(tk.Canvas):
         self._role = role
         self._kind = kind
         self._font = tkfont.Font(font=FONT_MUTED)
+        self._span: int | None = None
         self._redraw()
         self.bind("<Enter>", self._enter)
         self.bind("<Leave>", self._leave)
@@ -1405,10 +1621,21 @@ class _Pill(tk.Canvas):
             return BUTTON_ACTIVE, FG
         return BUTTON, FG
 
+    def natural_width(self) -> int:
+        linespace = max(self._font.metrics("linespace"), 16)
+        return self._font.measure(self._label) + linespace + 10
+
+    def set_span(self, width: int | None) -> None:
+        width = int(width) if width else None
+        if width == self._span:
+            return
+        self._span = width
+        self._redraw()
+
     def _redraw(self) -> None:
         linespace = max(self._font.metrics("linespace"), 16)
         pad_y = max(8, linespace // 4)
-        width = self._font.measure(self._label) + linespace + 10
+        width = self._span or self.natural_width()
         height = linespace + pad_y * 2
         super().configure(width=width, height=height)
         self.delete("all")
@@ -1594,9 +1821,58 @@ class _COMPOSITION_DATA(ctypes.Structure):
     ]
 
 
+_REDRAW_DEPTH = 0
+_GLASS_HWND = 0
+
+
+def _set_redraw(hwnd: int, frozen: bool) -> None:
+    """展开过程中先不画。改完大小后一次画完，避免系统把旧画面拉一下。"""
+    global _REDRAW_DEPTH
+    if not hwnd:
+        return
+    user = ctypes.WinDLL("user32", use_last_error=True)
+    send = user.SendMessageW
+    send.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    send.restype = ctypes.c_void_p
+    user.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]
+    user.RedrawWindow.restype = wintypes.BOOL
+    if frozen:
+        if _REDRAW_DEPTH == 0:
+            _disable_resize_animation(hwnd)
+            send(hwnd, 11, 0, 0)
+        _REDRAW_DEPTH += 1
+        return
+    _REDRAW_DEPTH = max(0, _REDRAW_DEPTH - 1)
+    if _REDRAW_DEPTH:
+        return
+    send(hwnd, 11, 1, 0)
+    # 不要用 LockWindowUpdate。合成窗口一解锁，会先闪一帧空的背景。
+    user.RedrawWindow(hwnd, None, None, 0x0001 | 0x0080 | 0x0100 | 0x0400)
+    try:
+        ctypes.windll.dwmapi.DwmFlush()
+    except Exception:
+        return
+
+
+def _disable_resize_animation(hwnd: int) -> None:
+    """关掉系统在改窗口大小时的过渡。那一帧会把原来的字拉开。"""
+    if getattr(_disable_resize_animation, "done", None) == hwnd:
+        return
+    try:
+        dwm = ctypes.windll.dwmapi
+        dwm.DwmSetWindowAttribute.argtypes = [wintypes.HWND, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+        dwm.DwmSetWindowAttribute.restype = ctypes.c_long
+        disabled = ctypes.c_int(1)
+        dwm.DwmSetWindowAttribute(hwnd, 3, ctypes.byref(disabled), ctypes.sizeof(disabled))
+        _disable_resize_animation.done = hwnd
+    except Exception:
+        return
+
+
 def _apply_glass(hwnd: int) -> None:
     """亚克力：后面的画面先模糊，再罩一层深色。按钮、文字和白卡片保持原色。"""
-    if not hwnd:
+    global _GLASS_HWND
+    if not hwnd or hwnd == _GLASS_HWND:
         return
     try:
         # AccentState 4 是亚克力。罩色为 0 时只留系统模糊，深色底和白卡片上的字都还在。
@@ -1608,6 +1884,7 @@ def _apply_glass(hwnd: int) -> None:
         set_comp.argtypes = [wintypes.HWND, ctypes.POINTER(_COMPOSITION_DATA)]
         set_comp.restype = wintypes.BOOL
         set_comp(hwnd, ctypes.byref(data))
+        _GLASS_HWND = hwnd
     except Exception:
         log_error(traceback.format_exc())
         return
