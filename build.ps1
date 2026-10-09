@@ -1,4 +1,4 @@
-﻿# 打包成单个程序，再用 Inno Setup 做成安装包。
+﻿# 发布 WinUI 程序，再用 Inno Setup 做成安装包。
 # 用法：powershell -ExecutionPolicy Bypass -File build.ps1
 
 $ErrorActionPreference = "Stop"
@@ -16,16 +16,18 @@ if ($proxy.ProxyEnable -eq 1 -and $proxy.ProxyServer) {
     $env:HTTPS_PROXY = $server
 }
 
-$python = (Get-Command python -ErrorAction Stop).Source
-$venvPython = Join-Path $root ".venv\Scripts\python.exe"
-
-if (-not (Test-Path $venvPython)) {
-    & $python -m venv (Join-Path $root ".venv")
+$dotnet = Join-Path $env:LOCALAPPDATA "dotnet\dotnet.exe"
+if (-not (Test-Path $dotnet)) {
+    $dotnet = (Get-Command dotnet -ErrorAction Stop).Source
 }
+$env:PATH = "$(Split-Path $dotnet);$env:PATH"
+$env:DOTNET_ROOT = Split-Path $dotnet
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 
-& $venvPython -c "import tkinter"
-& $venvPython -m pip install --disable-pip-version-check pyinstaller
-& $venvPython -m PyInstaller --noconfirm --clean --windowed --onefile --name NetWatch (Join-Path $root "netwatch.pyw")
+& $dotnet publish (Join-Path $root "src\NetWatch.App\NetWatch.App.csproj") `
+    -c Release -r win-x64 --self-contained true -p:Platform=x64 `
+    -p:DebugType=none -p:DebugSymbols=false --nologo
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $isccCandidates = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -38,4 +40,5 @@ if (-not $iscc) {
 }
 
 & $iscc (Join-Path $root "installer\NetWatch.iss")
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "安装包：$(Join-Path $root 'dist\NetWatch-Setup.exe')"

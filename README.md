@@ -73,7 +73,7 @@ dotnet run --project src/NetWatch.App/NetWatch.App.csproj -c Release
 在仓库根目录执行：
 
 ```powershell
-dotnet publish src/NetWatch.App/NetWatch.App.csproj -c Release -r win-x64 --self-contained true
+powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-生成的程序在 `src\NetWatch.App\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\publish\`。安装包挂到 GitHub Release，不要把 `publish` 或 `bin` 提交进 git。
+需要 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) 和 [Inno Setup 6](https://jrsoftware.org/isdl.php)。安装包生成在 `dist\NetWatch-Setup.exe`。不要把 `publish`、`bin` 或 `dist` 提交进 git。
