@@ -45,12 +45,13 @@ public sealed partial class MainWindow : Window
             presenter.IsMaximizable = false;
 presenter.IsMinimizable = false;
         }
-        ExtendsContentIntoTitleBar = true;
+        ExtendsContentIntoTitleBar = false;
         AppWindow.Resize(new SizeInt32(_settings.Mini ? 300 : _settings.Expanded ? 520 : 420, 80));
         Closed += (_, _) => _stop.Cancel();
         Shell.PointerPressed += OnPointerPressed;
         Shell.PointerMoved += OnPointerMoved;
         Shell.PointerReleased += OnPointerReleased;
+        Shell.BringIntoViewRequested += (_, args) => args.Handled = true;
         Shell.RightTapped += OnRightTapped;
         Activated += OnActivatedOnce;
         ApplyChrome();
@@ -75,6 +76,7 @@ presenter.IsMinimizable = false;
         Activated -= OnActivatedOnce;
         var hwnd = Win32.Hwnd(this);
         Win32.HideFromTaskbar(hwnd);
+        Win32.RemoveFrame(hwnd);
         Win32.RoundCorners(hwnd);
         TryAcrylic(hwnd);
         Win32.Topmost(hwnd, _settings.Topmost);
@@ -322,7 +324,6 @@ presenter.IsMinimizable = false;
         var details = _settings.Expanded && !_settings.Mini;
         DetailHost.Visibility = details ? Visibility.Visible : Visibility.Collapsed;
         Actions.Visibility = details ? Visibility.Visible : Visibility.Collapsed;
-        Full.Width = details ? 486 : double.NaN;
         ExpandButton.Content = _settings.Expanded ? "收起详情" : "展开详情";
         Shell.Padding = _settings.Mini ? new Thickness(8) : new Thickness(16, 12, 16, 12);
         AutostartButton.Content = SettingsStore.AutostartEnabled() ? "开机启动：开" : "开机启动：关";
@@ -346,16 +347,17 @@ presenter.IsMinimizable = false;
         SyncChrome();
         var expanded = _settings.Expanded && !_settings.Mini;
         var width = expanded ? 520 : ContentWidth();
-        var height = ContentHeight(expanded);
         var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
         var x = _settings.X ?? Math.Max(area.X + 8, area.X + area.Width - width - 24);
-        var y = _settings.Y ?? Math.Max(area.Y + 8, area.Y + area.Height - height - 48);
         var room = area.X + area.Width - x - 8;
         if (room >= 300)
             width = Math.Min(width, room);
+        var height = ContentHeight(expanded, width);
+        var y = _settings.Y ?? Math.Max(area.Y + 8, area.Y + area.Height - height - 48);
         AppWindow.Resize(new SizeInt32(width, height));
         if (first)
             AppWindow.Move(new PointInt32(x, y));
+        Win32.ClipRounded(Win32.Hwnd(this), 16);
     }
 
     private int ContentWidth()
@@ -371,14 +373,15 @@ presenter.IsMinimizable = false;
         return (int)Math.Ceiling(32 + 120 + 16 + Math.Max(row, sub) + 12);
     }
 
-    private int ContentHeight(bool expanded)
+    private int ContentHeight(bool expanded, int windowWidth)
     {
         if (_settings.Mini)
             return 56;
         if (!expanded)
             return 128;
+        var inner = Math.Max(280, windowWidth - 36);
         Shell.UpdateLayout();
-        Full.Measure(new Windows.Foundation.Size(520, 4000));
+        Full.Measure(new Windows.Foundation.Size(inner, 4000));
         return Math.Max(280, (int)Math.Ceiling(Full.DesiredSize.Height) + 28);
     }
 
@@ -449,9 +452,13 @@ presenter.IsMinimizable = false;
 
     private void ToggleTopmost(object sender, RoutedEventArgs e)
     {
+        var x = AppWindow.Position.X;
+        var y = AppWindow.Position.Y;
         _settings.Topmost = !_settings.Topmost;
         Save();
         Win32.Topmost(Win32.Hwnd(this), _settings.Topmost);
+        if (AppWindow.Position.X != x || AppWindow.Position.Y != y)
+            AppWindow.Move(new PointInt32(x, y));
         SyncChrome();
     }
 
@@ -656,8 +663,30 @@ internal static class Win32
 
     public static void RoundCorners(IntPtr hwnd)
     {
-        var preference = 2;
+        var preference = 1;
         DwmSetWindowAttribute(hwnd, 33, ref preference, 4);
+        var border = unchecked((int)0xFFFFFFFE);
+        DwmSetWindowAttribute(hwnd, 34, ref border, 4);
+    }
+
+    public static void RemoveFrame(IntPtr hwnd)
+    {
+        const int styleIndex = -16;
+        const int caption = 0x00C00000;
+        const int thickFrame = 0x00040000;
+        const int border = 0x00800000;
+        var style = GetWindowLongPtr(hwnd, styleIndex).ToInt64();
+        style &= ~(caption | thickFrame | border);
+        SetWindowLongPtr(hwnd, styleIndex, new IntPtr(style));
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020);
+    }
+
+    public static void ClipRounded(IntPtr hwnd, int radius)
+    {
+        if (!GetClientRect(hwnd, out var rect))
+            return;
+        var region = CreateRoundRectRgn(0, 0, rect.Right + 1, rect.Bottom + 1, radius * 2, radius * 2);
+        SetWindowRgn(hwnd, region, true);
     }
 
     public static void Topmost(IntPtr hwnd, bool on) =>
@@ -675,8 +704,32 @@ internal static class Win32
     [DllImport("user32.dll")]
     private static extern int SetWindowLong(IntPtr hwnd, int index, int value);
 
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
